@@ -54,7 +54,17 @@ python -m codemira.launchd install
 
 ### Plugin
 
-Copy the `plugin/` directory into your OpenCode project's `.opencode/plugins/` path, or configure OpenCode to load it. Requires Bun or a bundler that handles TypeScript ESM.
+Add the plugin to your global OpenCode config at `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "plugin": ["file:///path/to/CodeMira/plugin/src/index.ts"]
+}
+```
+
+This makes it available in every OpenCode session regardless of working directory. OpenCode auto-discovers plugins from this config on startup.
+
+Requires Bun or a bundler that handles TypeScript ESM. Ollama must be running locally (the plugin calls the subcortical model for intent analysis).
 
 Prompt templates are loaded from `prompts/` relative to the plugin source (`plugin/src/../../prompts`). Missing files raise a fatal error at plugin load — the plugin does not silently no-op.
 
@@ -63,9 +73,11 @@ Prompt templates are loaded from `prompts/` relative to the plugin source (`plug
 | Variable | Default | Description |
 |---|---|---|
 | `CODEMIRA_HTTP_PORT` | `9473` | Daemon HTTP port (bound to `127.0.0.1`) |
+| `CODEMIRA_POLL_INTERVAL_MINUTES` | `15` | Minutes between daemon poll cycles |
 | `CODEMIRA_IDLE_THRESHOLD_MINUTES` | `60` | Minutes before a session is considered idle |
-| `CODEMIRA_EXTRACTION_MODEL` | `z-ai/GLM-5.1` | OpenRouter model for extraction |
-| `CODEMIRA_SUBCORTICAL_MODEL` | `gemma-4-e2b-q4` | Ollama model for subcortical / compression / link classification |
+| `CODEMIRA_EXTRACTION_MODEL` | `z-ai/glm-5.1` | OpenRouter model for extraction |
+| `CODEMIRA_SUBCORTICAL_MODEL` | `gemma4:e2b` | Ollama model for subcortical / compression / link classification |
+| `CODEMIRA_CONSOLIDATION_MODEL` | `gemma4:e4b` | Ollama model for memory consolidation |
 | `CODEMIRA_MAX_SURFACED_MEMORIES` | `8` | Max memories per retrieval |
 | `OPENROUTER_API_KEY` | — | Required for extraction |
 | `OPENCODE_DB` | auto-discovered | Override path to OpenCode's global database |
@@ -85,6 +97,38 @@ cd plugin && bun test
 ```
 
 > **Note:** Embedding tests require the `MongoDB/mdbr-leaf-ir-asym` model to be downloaded (first run will fetch it). OpenRouter tests require `OPENROUTER_API_KEY` in the environment.
+
+## Development
+
+For faster iteration during development, lower the poll and idle thresholds:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-v1-...
+CODEMIRA_POLL_INTERVAL_MINUTES=1 CODEMIRA_IDLE_THRESHOLD_MINUTES=1 python -m codemira.daemon
+```
+
+This makes the daemon check for idle sessions every minute and treat sessions as idle after just 1 minute of inactivity (defaults are 15 and 60 respectively).
+
+Verify extraction with:
+
+```bash
+sqlite3 <project-worktree>/.codememory/memories.db \
+  "SELECT id, category, importance, substr(text,1,80) FROM memories WHERE is_archived=0 ORDER BY importance DESC LIMIT 20;"
+```
+
+Verify retrieval by hitting the daemon directly:
+
+```bash
+curl -s -X POST http://localhost:9473/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query_expansion":"your query","entities":[],"pinned_memory_ids":[],"project_dir":"/path/to/project"}'
+```
+
+Health check:
+
+```bash
+curl -s http://localhost:9473/health
+```
 
 ## ⚠️ Initial Implementation
 
