@@ -4,6 +4,7 @@ import sqlite3
 import time
 
 from codemira.config import DaemonConfig
+from codemira.errors import ExtractionError
 from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity, insert_memory_link, log_extraction, get_memory
 from codemira.store.index import MemoryIndex
 from codemira.store.manager import StoreManager
@@ -51,15 +52,21 @@ def process_idle_session(
     api_key: str,
 ):
     from codemira.opencode_db import read_session_conversation
+    memory_conn, memory_index = manager.get(project_root)
     conversation = read_session_conversation(opencode_conn, session_id)
     if not conversation:
+        log_extraction(memory_conn, session_id, 0)
         return
-    memory_conn, memory_index = manager.get(project_root)
-    compressed = compress_tool_calls(conversation, config.subcortical_model, config.ollama_url, prompts_dir)
-    memories = extract_memories(
-        compressed, memory_conn, config.extraction_model, api_key,
-        config.deduplicate_text_threshold, prompts_dir,
-    )
+    try:
+        compressed = compress_tool_calls(conversation, config.subcortical_model, config.ollama_url, prompts_dir)
+        memories = extract_memories(
+            compressed, memory_conn, config.extraction_model, api_key,
+            config.deduplicate_text_threshold, prompts_dir,
+        )
+    except ExtractionError as e:
+        log_extraction(memory_conn, session_id, 0)
+        log.warning("Marking session %s as extracted after non-retryable error: %s", session_id, e)
+        return
     if not memories:
         log_extraction(memory_conn, session_id, 0)
         return
@@ -68,31 +75,38 @@ def process_idle_session(
     texts = [m["text"] for m in memories]
     embeddings = provider.encode_deep(texts)
     stored_count = 0
-    for mem, emb in zip(memories, embeddings):
-        if is_duplicate_vector(emb, memory_index, config.deduplicate_cosine_threshold):
-            continue
-        mid = insert_memory(memory_conn, mem["text"], mem.get("importance", 0.5),
-                            mem.get("category", "priority"), emb, session_id)
-        entities = extract_entities(
-            mem["text"], config.subcortical_model, config.ollama_url, prompts_dir,
-        )
-        for entity in entities:
-            eid = get_or_create_entity(memory_conn, entity["name"], entity["type"])
-            link_memory_entity(memory_conn, mid, eid)
-        similar = memory_index.search(emb, k=5)
-        for linked_id, sim in similar:
-            if sim >= config.link_similarity_threshold:
-                linked_mem = get_memory(memory_conn, linked_id)
-                if linked_mem is None:
-                    continue
-                link_type = classify_link(
-                    mem["text"], linked_mem["text"],
-                    config.subcortical_model, config.ollama_url, prompts_dir,
-                )
-                insert_memory_link(memory_conn, mid, linked_id, link_type)
-        memory_index.add_vector(mid, emb)
-        stored_count += 1
-    memory_index.rebuild_after_write(memory_conn)
+    try:
+        for mem, emb in zip(memories, embeddings):
+            if is_duplicate_vector(emb, memory_index, config.deduplicate_cosine_threshold):
+                continue
+            mid = insert_memory(memory_conn, mem["text"], mem.get("importance", 0.5),
+                                mem.get("category", "priority"), emb, session_id)
+            entities = extract_entities(
+                mem["text"], config.subcortical_model, config.ollama_url, prompts_dir,
+            )
+            for entity in entities:
+                eid = get_or_create_entity(memory_conn, entity["name"], entity["type"])
+                link_memory_entity(memory_conn, mid, eid)
+            similar = memory_index.search(emb, k=5)
+            for linked_id, sim in similar:
+                if sim >= config.link_similarity_threshold:
+                    linked_mem = get_memory(memory_conn, linked_id)
+                    if linked_mem is None:
+                        continue
+                    link_type = classify_link(
+                        mem["text"], linked_mem["text"],
+                        config.subcortical_model, config.ollama_url, prompts_dir,
+                    )
+                    insert_memory_link(memory_conn, mid, linked_id, link_type)
+            memory_index.add_vector(mid, emb)
+            stored_count += 1
+        memory_index.rebuild_after_write(memory_conn)
+    except Exception:
+        if stored_count > 0:
+            log_extraction(memory_conn, session_id, stored_count)
+            log.warning("Stored %d/%d memories for session %s before storage error; session marked as extracted to avoid re-compression",
+                        stored_count, len(memories), session_id)
+        raise
     log_extraction(memory_conn, session_id, stored_count)
     log.info("Extracted %d memories from session %s (project=%s)", stored_count, session_id, project_root)
 

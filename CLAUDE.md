@@ -4,7 +4,7 @@
 
 CodeMira is a developer memory system for OpenCode coding sessions. Two processes cooperate through a single per-project store:
 
-- **Python daemon** (`daemon/codemira/`): persistent process launched by launchd. Polls OpenCode's SQLite for idle sessions, compresses tool I/O via Ollama, extracts memories via OpenRouter (GLM-5.1), embeds via `MongoDB/mdbr-leaf-ir-asym`, classifies links via Ollama, consolidates clusters. Serves `/health` and `/retrieve` on `127.0.0.1:9473`.
+- **Python daemon** (`daemon/codemira/`): persistent process launched by launchd. Polls OpenCode's SQLite for idle sessions, compresses tool I/O via Ollama, extracts memories via OpenRouter (GLM-5.1), embeds via `MongoDB/mdbr-leaf-ir-asym`, classifies links via Ollama, consolidates clusters. Serves `/health` and `/retrieve` on `127.0.0.1:9473`. `ExtractionError` (`daemon/codemira/errors.py`) separates non-retryable logic failures from infrastructure outages.
 - **TypeScript plugin** (`plugin/src/`): loaded by OpenCode. Hooks `experimental.chat.messages.transform`. Extracts recent tool trace + user goal, calls an Ollama subcortical model for intent analysis, calls the daemon `/retrieve`, injects a `<developer_context>` HUD into the messages array before the LLM call.
 
 Memory stores are per-project at `<project-worktree>/.codememory/memories.db` (+ `memories.index` hnswlib cache). No global store — widely applicable preferences re-extract per project (reinforcement, not duplication).
@@ -109,6 +109,12 @@ All Ollama calls go through `call_ollama()` in `daemon/codemira/extraction/compr
 ### Hybrid Retrieval
 `HybridSearcher.hybrid_search()` issues BM25 (via FTS5) + ANN (via hnswlib) with `limit * 2` each, merges via Reciprocal Rank Fusion (`RRF_K=60`), and caps at `limit`. Fresh search results are augmented by `hub_discovery()` (entity-indexed + link-graph memories) and pinned memories from the previous iteration. Final cap: `max_surfaced_memories` (default 8).
 
+### Extraction Error Taxonomy
+`ExtractionError` (`daemon/codemira/errors.py`) marks non-retryable extraction failures — the LLM returned unparseable output or an unexpected response structure. Retrying the same conversation will likely produce the same result, so the session is logged to `extraction_log` and skipped on future cycles. Infrastructure failures (`URLError`, `HTTPError`, `sqlite3.OperationalError`) are NOT `ExtractionError` — they propagate to allow retry when the outage resolves. `call_ollama()` and `call_api_model()` raise `ExtractionError` for bad JSON bodies or missing keys in otherwise successful HTTP responses; network errors still propagate as `URLError`/`HTTPError`.
+
+### Extraction Skip Mechanism
+The `extraction_log` table (`session_id`, `extracted_at`, `memory_count`) prevents re-processing. Every code path out of `process_idle_session` MUST call `log_extraction()` — including the empty-conversation branch and `ExtractionError` catches — or the session retries every poll cycle, re-incurring expensive compression calls. The storage loop also logs partial progress before re-raising infrastructure exceptions, so even mid-loop failures don't trigger re-compression.
+
 ### HUD Injection
 The plugin generates fresh `msg_<26hex>` / `prt_<26hex>` IDs on every call (via `randomBytes(13).toString("hex")`) and pushes a `user` message with a synthetic text part containing the HUD. The IDs never touch OpenCode's DB — they live only in the in-memory `output.messages` array the hook mutates. No cleanup logic; messages are re-fetched from DB every iteration, so stale HUDs can't accumulate.
 
@@ -169,6 +175,11 @@ Config objects use `pydantic-settings.BaseSettings`. See `daemon/codemira/config
 **Wrong**: Assuming `is_duplicate_vector()` catches near-duplicates from the first extraction batch on a fresh store.
 **Reality**: `MemoryIndex.index` is `None` until the first rebuild, so `add_vector()` no-ops and within-batch duplicates slip past vector dedup. Text dedup (`rapidfuzz`) still runs.
 **Mitigation**: Keep `is_duplicate_text` thresholds conservative enough to catch near-duplicates without a vector signal.
+
+## ❌ Extraction Path Without log_extraction
+**Wrong**: Returning early from `process_idle_session` without calling `log_extraction` (e.g., empty-conversation early return, exception mid-pipeline).
+**Right**: Every exit path calls `log_extraction(memory_conn, session_id, count)`. For `ExtractionError` catch with count 0. For storage-loop infrastructure failures with partial progress, log before re-raising.
+**Why it matters**: Without logging, the session retries every poll cycle (15 min), re-incurring expensive Ollama compression calls (one per tool invocation). A single missing `log_extraction` call can burn LLM tokens indefinitely.
 
 ## ❌ Infrastructure Hedging (Faux-Resilience)
 **Example**: `try: result = db.query() except: return []` making database outages look like empty data.

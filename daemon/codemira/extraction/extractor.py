@@ -2,6 +2,7 @@ import json
 import urllib.request
 import os
 
+from codemira.errors import ExtractionError
 from codemira.store.db import get_existing_memory_texts
 from codemira.extraction.dedup import is_duplicate_text
 
@@ -19,8 +20,15 @@ def call_api_model(model: str, system: str, user: str, api_key: str) -> str:
                                   headers={"Content-Type": "application/json",
                                            "Authorization": f"Bearer {api_key}"})
     with urllib.request.urlopen(req, timeout=120) as resp:
-        result = json.loads(resp.read())
+        body = resp.read()
+    try:
+        result = json.loads(body)
+    except json.JSONDecodeError as e:
+        raise ExtractionError(f"OpenRouter returned non-JSON response: {e}") from e
+    try:
         return result["choices"][0]["message"]["content"]
+    except (KeyError, TypeError, IndexError) as e:
+        raise ExtractionError(f"OpenRouter response missing expected structure: {e}") from e
 
 
 def load_prompt(name: str, prompts_dir: str | None = None) -> str:
@@ -52,11 +60,14 @@ def extract_memories(
         start = response_text.find("[")
         end = response_text.rfind("]") + 1
         if start >= 0 and end > start:
-            memories = json.loads(response_text[start:end])
+            try:
+                memories = json.loads(response_text[start:end])
+            except json.JSONDecodeError as e:
+                raise ExtractionError(f"Extraction model returned completely unparseable output: {e}") from e
         else:
-            return []
+            raise ExtractionError(f"Extraction model returned no array in output: {response_text[:200]}")
     if not isinstance(memories, list):
-        return []
+        raise ExtractionError(f"Extraction model returned {type(memories).__name__} instead of list")
     deduped = []
     for m in memories:
         if not isinstance(m, dict) or "text" not in m:
