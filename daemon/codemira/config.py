@@ -10,10 +10,10 @@ class DaemonConfig(BaseSettings):
     tool_trace_window: int = 5
     memory_truncation_words: int = 20
     embedding_dimension: int = 768
-    subcortical_model: str = "gemma-4-e2b-q4"
-    extraction_model: str = "z-ai/GLM-5.1"
+    subcortical_model: str = "gemma4:e2b"
+    extraction_model: str = "z-ai/glm-5.1"
     consolidation_interval_hours: int = 24
-    consolidation_model: str = "gemma-4-26b-a4b"
+    consolidation_model: str = "gemma4:e4b"
     consolidation_similarity_threshold: float = 0.85
     link_similarity_threshold: float = 0.75
     deduplicate_text_threshold: float = 0.95

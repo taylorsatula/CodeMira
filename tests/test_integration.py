@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS part (
 
 
 def _create_opencode_db(tmpdir: str, project_worktree: str = "/tmp/test") -> tuple[sqlite3.Connection, str]:
+    os.makedirs(project_worktree, exist_ok=True)
     db_path = os.path.join(tmpdir, "opencode.db")
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=wal")

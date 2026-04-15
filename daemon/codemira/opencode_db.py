@@ -35,6 +35,10 @@ def open_opencode_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _is_valid_worktree(path: str | None) -> bool:
+    return bool(path) and os.path.abspath(path) != os.sep
+
+
 def find_idle_sessions(opencode_conn: sqlite3.Connection, extracted_session_ids: set[str], idle_threshold_minutes: int, min_messages: int = 4) -> list[dict]:
     import time
     cutoff_ms = int((time.time() - idle_threshold_minutes * 60) * 1000)
@@ -47,14 +51,17 @@ def find_idle_sessions(opencode_conn: sqlite3.Connection, extracted_session_ids:
     ).fetchall()
     results = []
     for r in rows:
-        if r["id"] not in extracted_session_ids:
-            results.append({"id": r["id"], "time_updated": r["time_updated"], "project_root": r["project_root"]})
+        if r["id"] in extracted_session_ids:
+            continue
+        if not _is_valid_worktree(r["project_root"]) or not os.path.isdir(r["project_root"]):
+            continue
+        results.append({"id": r["id"], "time_updated": r["time_updated"], "project_root": r["project_root"]})
     return results
 
 
 def list_project_roots(opencode_conn: sqlite3.Connection) -> list[str]:
     rows = opencode_conn.execute("SELECT DISTINCT worktree FROM project WHERE worktree IS NOT NULL").fetchall()
-    return [r["worktree"] for r in rows if r["worktree"]]
+    return [r["worktree"] for r in rows if _is_valid_worktree(r["worktree"]) and os.path.isdir(r["worktree"])]
 
 
 def read_session_conversation(conn: sqlite3.Connection, session_id: str) -> list[dict]:

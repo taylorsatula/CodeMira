@@ -118,6 +118,7 @@ def run_daemon(config: DaemonConfig | None = None):
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     last_consolidation = 0
+    first_cycle = True
     while True:
         try:
             from codemira.opencode_db import discover_opencode_db, open_opencode_db, find_idle_sessions, list_project_roots
@@ -140,6 +141,9 @@ def run_daemon(config: DaemonConfig | None = None):
                 except Exception as e:
                     log.error("Error processing session %s: %s", session["id"], e)
             opencode_conn.close()
+            if first_cycle:
+                log.info("Daemon ready — polling every %d min, found %d project(s)", config.poll_interval_minutes, len(manager._stores))
+                first_cycle = False
             now = time.time()
             if now - last_consolidation >= config.consolidation_interval_hours * 3600:
                 try:

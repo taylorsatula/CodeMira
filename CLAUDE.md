@@ -4,7 +4,7 @@
 
 CodeMira is a developer memory system for OpenCode coding sessions. Two processes cooperate through a single per-project store:
 
-- **Python daemon** (`daemon/codemira/`): persistent process launched by launchd. Polls OpenCode's global SQLite for idle sessions, compresses tool I/O via Ollama, extracts memories via OpenRouter (GLM-5.1), embeds via `MongoDB/mdbr-leaf-ir-asym`, classifies links via Ollama, consolidates clusters. Serves `/health` and `/retrieve` on `127.0.0.1:9473`.
+- **Python daemon** (`daemon/codemira/`): persistent process launched by launchd. Polls OpenCode's SQLite for idle sessions, compresses tool I/O via Ollama, extracts memories via OpenRouter (GLM-5.1), embeds via `MongoDB/mdbr-leaf-ir-asym`, classifies links via Ollama, consolidates clusters. Serves `/health` and `/retrieve` on `127.0.0.1:9473`.
 - **TypeScript plugin** (`plugin/src/`): loaded by OpenCode. Hooks `experimental.chat.messages.transform`. Extracts recent tool trace + user goal, calls an Ollama subcortical model for intent analysis, calls the daemon `/retrieve`, injects a `<developer_context>` HUD into the messages array before the LLM call.
 
 Memory stores are per-project at `<project-worktree>/.codememory/memories.db` (+ `memories.index` hnswlib cache). No global store — widely applicable preferences re-extract per project (reinforcement, not duplication).
