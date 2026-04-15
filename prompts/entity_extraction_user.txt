@@ -1,0 +1,3 @@
+Memory text: {text}
+
+Extract entities as a JSON array.

@@ -1,0 +1,62 @@
+<directive>Output XML only. Start with <analysis>. No preamble.</directive>
+
+Extract technical concepts for Knowledge Graph lookup. Include libraries, frameworks, tools, design patterns, testing frameworks, and named architectural concepts the developer references or the agent is working with. Exclude generic terms (function, variable, class, method, return, import, module, file, string, integer, boolean). Most actions have 0-2 concepts. If none, output <entities>None</entities> exactly.
+
+║⊕║ BEGIN ENTITY RULES ║⊕║
+Rule: Extract named technical concepts — things that have a proper name or identity in the software ecosystem.
+EXTRACT: Libraries (sqlalchemy, pytest, react), frameworks (fastapi, nextjs, express), tools (docker, webpack, git), patterns (factory, middleware, pub/sub, event-driven), protocols (oauth, grpc, websocket), specific errors (ConnectionRefusedError, ValidationError).
+DO NOT EXTRACT: Generic terms (function, variable, class, method, callback, handler, config, model, service, helper, util).
+Extract only concepts relevant to the current action. Most actions have 0-2. If none, output <entities>None</entities> exactly.
+║⊕║ END ENTITY RULES ║⊕║
+
+Filter pinned memories: drop memories no longer relevant to what the agent is currently doing. Keep memories that directly affect the current action or file.
+
+║⊗║ BEGIN PASSAGE RULES ║⊗║
+Rule: Drop memories about a different task, file, or concern than what the agent is currently working on. Keep memories about the same file, same library, same pattern, or a decision that directly affects the current action. When uncertain, drop — stale context in a tool loop accumulates fast and obscures relevant signal. Copy exact passage ID (mem_ prefix).
+║⊗║ END PASSAGE RULES ║⊗║
+
+Generate retrieval phrases to match stored developer memories. (Memory examples: "Prefers threading over asyncio for concurrent I/O" "Uses direct file append instead of logging module for simple cases" "Tried Timer for retries, caused race conditions — use Event.wait instead").
+
+║⊙║ BEGIN EXPANSION RULES ║⊙║
+Create 2-4 concrete, semicolon-separated phrases. Never use abstract meta-descriptions (like "code modification" or "file editing"). First phrase MUST describe the current action with specific library, file, or pattern names. Remaining phrases expand with related developer-style terms: how this developer approaches this kind of work, what alternatives they reject, what conventions they follow.
+║⊙║ END EXPANSION RULES ║⊙║
+
+<examples>
+<example>
+<actions>read_file(db/connection.py) → grep(refresh_token, src/auth/) → edit_file(src/auth/oauth.py, L45-50)</actions>
+<goal>Add refresh token rotation to the auth module</goal>
+<output><analysis>
+<entities>OAuth, refresh_token</entities>
+<keep>mem_a1B2c3D4</keep>
+<query_expansion>implementing OAuth refresh token rotation; token expiry and renewal patterns; auth module error handling style</query_expansion>
+</analysis></output>
+</example>
+
+<example>
+<actions>run_command(pytest tests/test_runner.py) → 1 failed: test_retry_on_high_load → read_file(src/prio/runner.py, L31-38)</actions>
+<goal>Fix the flaky retry test</goal>
+<output><analysis>
+<entities>pytest, threading</entities>
+<keep>mem_c9d0e1f2, mem_k7l8m9n0</keep>
+<query_expansion>fixing flaky pytest test with race condition; threading Event.wait vs Timer for test synchronization; retry logic testing patterns</query_expansion>
+</analysis></output>
+</example>
+
+<example>
+<actions>edit_file(src/prio/runner.py, L62-70) → run_command(pytest tests/)</actions>
+<goal>Log failed tasks to a file</goal>
+<output><analysis>
+<entities>None</entities>
+<keep>mem_g3h4i5j6</keep>
+<query_expansion>writing failure log with direct file append; simple file I/O over logging framework; error output and failure recording patterns</query_expansion>
+</analysis></output>
+</example>
+</examples>
+
+<output_format><![CDATA[
+<analysis>
+<entities>React, FastAPI</entities>
+<keep>mem_a1B2c3D4, mem_e5F6g7H8</keep>
+<query_expansion>building React form with FastAPI backend; form validation patterns; API error handling conventions</query_expansion>
+</analysis>
+]]></output_format>

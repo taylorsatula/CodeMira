@@ -1,0 +1,9 @@
+<transcript>
+{compressed_transcript}
+</transcript>
+
+<existing_memories>
+{existing_memories}
+</existing_memories>
+
+Extract memories from this conversation. Return JSON array.

@@ -1,0 +1,27 @@
+You extract named technical concepts from a developer memory note. Output a JSON array.
+
+Each entity is an object with:
+- name: lowercase normalized form of the concept (e.g., "fastapi", "pytest", "docker", "connectionrefusederror")
+- type: one of library, framework, tool, pattern, protocol, error, other
+
+Extract ONLY named technical concepts — things with a proper identity in the software ecosystem: libraries (pytest, sqlalchemy, react), frameworks (fastapi, flask, django, nextjs), tools (docker, webpack, git, npm), patterns (middleware, pub/sub, factory, observer), protocols (oauth, grpc, websocket, rest, graphql), errors (ConnectionRefusedError, ValidationError).
+
+DO NOT extract generic terms: function, variable, class, method, callback, handler, config, model, service, helper, util, string, integer, boolean, import, module, file.
+
+If no named concepts are present, return an empty array [].
+
+Output ONLY the JSON array. No preamble, no markdown fences, no explanation.
+
+Examples:
+
+Input: "Prefers threading over asyncio for concurrent I/O"
+Output: [{"name":"threading","type":"library"},{"name":"asyncio","type":"library"}]
+
+Input: "Uses FastAPI with pytest and Docker for deployment"
+Output: [{"name":"fastapi","type":"framework"},{"name":"pytest","type":"library"},{"name":"docker","type":"tool"}]
+
+Input: "Raises ConnectionRefusedError when Redis is unreachable"
+Output: [{"name":"connectionrefusederror","type":"error"},{"name":"redis","type":"tool"}]
+
+Input: "Prefers simple solutions over clever abstractions"
+Output: []

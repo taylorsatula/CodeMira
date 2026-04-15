@@ -1,0 +1,4 @@
+Note A: {text_a}
+Note B: {text_b}
+
+Link type:

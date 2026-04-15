@@ -1,0 +1,31 @@
+import logging
+
+from codemira.extraction.compressor import call_ollama
+from codemira.extraction.extractor import load_prompt
+
+log = logging.getLogger(__name__)
+
+VALID_LINK_TYPES = {"corroborates", "conflicts", "supersedes", "refines", "contextualizes"}
+
+
+def classify_link(
+    text_a: str,
+    text_b: str,
+    model: str,
+    ollama_url: str,
+    prompts_dir: str,
+) -> str:
+    system_prompt = load_prompt("link_classification_system", prompts_dir)
+    user_template = load_prompt("link_classification_user", prompts_dir)
+    user_prompt = user_template.replace("{text_a}", text_a).replace("{text_b}", text_b)
+    try:
+        response = call_ollama(model, system_prompt, user_prompt, ollama_url)
+    except Exception as e:
+        log.warning("Link classification call failed (%s); defaulting to corroborates", e)
+        return "corroborates"
+    token = response.strip().lower().split()[0] if response.strip() else ""
+    token = token.rstrip(".,:;!?")
+    if token in VALID_LINK_TYPES:
+        return token
+    log.warning("Link classifier returned unrecognized token %r; defaulting to corroborates", token)
+    return "corroborates"

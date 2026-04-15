@@ -1,0 +1,5 @@
+<cluster>
+{memory_texts}
+</cluster>
+
+Decide whether these memories should be consolidated or kept separate.
