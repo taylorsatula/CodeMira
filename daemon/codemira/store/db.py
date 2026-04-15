@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS memory_links (
 CREATE TABLE IF NOT EXISTS extraction_log (
     session_id TEXT PRIMARY KEY,
     extracted_at TEXT NOT NULL,
-    memory_count INTEGER NOT NULL
+    memory_count INTEGER NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    is_complete INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(text, content='memories', content_rowid='rowid');
@@ -240,14 +242,35 @@ def get_linked_memories(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def log_extraction(conn: sqlite3.Connection, session_id: str, memory_count: int):
+def log_extraction(conn: sqlite3.Connection, session_id: str, memory_count: int, is_complete: bool = True) -> int:
     now = datetime.now(timezone.utc).isoformat()
-    conn.execute("INSERT OR REPLACE INTO extraction_log (session_id, extracted_at, memory_count) VALUES (?, ?, ?)", (session_id, now, memory_count))
+    complete_flag = 1 if is_complete else 0
+    conn.execute(
+        "INSERT INTO extraction_log (session_id, extracted_at, memory_count, attempt_count, is_complete) "
+        "VALUES (?, ?, ?, 1, ?) "
+        "ON CONFLICT(session_id) DO UPDATE SET "
+        "extracted_at = excluded.extracted_at, "
+        "memory_count = excluded.memory_count, "
+        "attempt_count = attempt_count + 1, "
+        "is_complete = excluded.is_complete",
+        (session_id, now, memory_count, complete_flag),
+    )
+    conn.commit()
+    row = conn.execute("SELECT attempt_count FROM extraction_log WHERE session_id = ?", (session_id,)).fetchone()
+    return row["attempt_count"]
+
+
+def mark_extraction_complete(conn: sqlite3.Connection, session_id: str):
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE extraction_log SET is_complete = 1, extracted_at = ? WHERE session_id = ?",
+        (now, session_id),
+    )
     conn.commit()
 
 
 def is_session_extracted(conn: sqlite3.Connection, session_id: str) -> bool:
-    row = conn.execute("SELECT 1 FROM extraction_log WHERE session_id = ?", (session_id,)).fetchone()
+    row = conn.execute("SELECT 1 FROM extraction_log WHERE session_id = ? AND is_complete = 1", (session_id,)).fetchone()
     return row is not None
 
 

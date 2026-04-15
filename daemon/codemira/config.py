@@ -22,6 +22,7 @@ class DaemonConfig(BaseSettings):
     hnsw_m: int = 16
     hnsw_ef_search: int = 50
     ollama_url: str = "http://localhost:11434"
+    max_extraction_attempts: int = 3
     opencode_db_path: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="CODEMIRA_")

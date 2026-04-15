@@ -5,7 +5,7 @@ import time
 
 from codemira.config import DaemonConfig
 from codemira.errors import ExtractionError
-from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity, insert_memory_link, log_extraction, get_memory
+from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity, insert_memory_link, log_extraction, mark_extraction_complete, get_memory
 from codemira.store.index import MemoryIndex
 from codemira.store.manager import StoreManager
 from codemira.server import create_server
@@ -53,29 +53,29 @@ def process_idle_session(
 ):
     from codemira.opencode_db import read_session_conversation
     memory_conn, memory_index = manager.get(project_root)
-    conversation = read_session_conversation(opencode_conn, session_id)
-    if not conversation:
-        log_extraction(memory_conn, session_id, 0)
-        return
     try:
-        compressed = compress_tool_calls(conversation, config.subcortical_model, config.ollama_url, prompts_dir)
-        memories = extract_memories(
-            compressed, memory_conn, config.extraction_model, api_key,
-            config.deduplicate_text_threshold, prompts_dir,
-        )
-    except ExtractionError as e:
-        log_extraction(memory_conn, session_id, 0)
-        log.warning("Marking session %s as extracted after non-retryable error: %s", session_id, e)
-        return
-    if not memories:
-        log_extraction(memory_conn, session_id, 0)
-        return
-    from codemira.embeddings import EmbeddingsProvider
-    provider = EmbeddingsProvider.get()
-    texts = [m["text"] for m in memories]
-    embeddings = provider.encode_deep(texts)
-    stored_count = 0
-    try:
+        conversation = read_session_conversation(opencode_conn, session_id)
+        if not conversation:
+            log_extraction(memory_conn, session_id, 0)
+            return
+        try:
+            compressed = compress_tool_calls(conversation, config.subcortical_model, config.ollama_url, prompts_dir)
+            memories = extract_memories(
+                compressed, memory_conn, config.extraction_model, api_key,
+                config.deduplicate_text_threshold, prompts_dir,
+            )
+        except ExtractionError as e:
+            log_extraction(memory_conn, session_id, 0)
+            log.warning("Marking session %s as extracted after non-retryable error: %s", session_id, e)
+            return
+        if not memories:
+            log_extraction(memory_conn, session_id, 0)
+            return
+        from codemira.embeddings import EmbeddingsProvider
+        provider = EmbeddingsProvider.get()
+        texts = [m["text"] for m in memories]
+        embeddings = provider.encode_deep(texts)
+        stored_count = 0
         for mem, emb in zip(memories, embeddings):
             if is_duplicate_vector(emb, memory_index, config.deduplicate_cosine_threshold):
                 continue
@@ -101,20 +101,21 @@ def process_idle_session(
             memory_index.add_vector(mid, emb)
             stored_count += 1
         memory_index.rebuild_after_write(memory_conn)
+        log_extraction(memory_conn, session_id, stored_count)
+        log.info("Extracted %d memories from session %s (project=%s)", stored_count, session_id, project_root)
     except Exception:
-        if stored_count > 0:
-            log_extraction(memory_conn, session_id, stored_count)
-            log.warning("Stored %d/%d memories for session %s before storage error; session marked as extracted to avoid re-compression",
-                        stored_count, len(memories), session_id)
+        attempt_count = log_extraction(memory_conn, session_id, 0, is_complete=False)
+        if attempt_count >= config.max_extraction_attempts:
+            mark_extraction_complete(memory_conn, session_id)
+            log.warning("Session %s marked as unextractable after %d failed attempts", session_id, attempt_count)
+            return
         raise
-    log_extraction(memory_conn, session_id, stored_count)
-    log.info("Extracted %d memories from session %s (project=%s)", stored_count, session_id, project_root)
 
 
 def _collect_extracted_session_ids(manager: StoreManager) -> set[str]:
     extracted: set[str] = set()
     for _, conn, _ in manager.items():
-        rows = conn.execute("SELECT session_id FROM extraction_log").fetchall()
+        rows = conn.execute("SELECT session_id FROM extraction_log WHERE is_complete = 1").fetchall()
         extracted.update(r["session_id"] for r in rows)
     return extracted
 
