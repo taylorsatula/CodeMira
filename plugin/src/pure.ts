@@ -104,6 +104,18 @@ export function triggerArcGeneration(
   }).catch(() => {})
 }
 
+export function triggerExtraction(
+  daemonUrl: string,
+  sessionId: string,
+  projectDir: string,
+): void {
+  fetch(`${daemonUrl}/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, project_dir: projectDir }),
+  }).catch(() => {})
+}
+
 export async function fetchArcSummary(
   daemonUrl: string,
   sessionId: string,

@@ -174,3 +174,59 @@ class TestArcGenerateEndpoint:
             assert False
         except urllib.error.HTTPError as e:
             assert e.code == 400
+
+
+class TestExtractEndpoint:
+    def test_extract_returns_202(self, server_setup):
+        base_url, conn, mi, ids, embs, config, project_dir = server_setup
+        payload = json.dumps({
+            "session_id": "ses_extract",
+            "project_dir": project_dir,
+        }).encode()
+        req = urllib.request.Request(f"{base_url}/extract", data=payload,
+                                      headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req)
+        assert resp.code == 202
+        data = json.loads(resp.read())
+        assert data["status"] == "extracting"
+
+    def test_extract_missing_params_returns_400(self, server_setup):
+        base_url = server_setup[0]
+        payload = json.dumps({"session_id": "ses_x"}).encode()
+        req = urllib.request.Request(f"{base_url}/extract", data=payload,
+                                      headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req)
+            assert False
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+
+    def test_extract_invalid_json_returns_400(self, server_setup):
+        base_url = server_setup[0]
+        req = urllib.request.Request(f"{base_url}/extract", data=b"not json",
+                                      headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req)
+            assert False
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+
+    def test_extract_skips_already_extracted_session(self, server_setup):
+        base_url, conn, mi, ids, embs, config, project_dir = server_setup
+        from codemira.store.db import log_extraction
+        log_extraction(conn, "ses_done", memory_count=3, is_complete=True)
+        payload = json.dumps({
+            "session_id": "ses_done",
+            "project_dir": project_dir,
+        }).encode()
+        req = urllib.request.Request(f"{base_url}/extract", data=payload,
+                                      headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req)
+        assert resp.code == 202
+        time.sleep(0.2)
+        row = conn.execute(
+            "SELECT memory_count, attempt_count FROM extraction_log WHERE session_id = ?",
+            ("ses_done",),
+        ).fetchone()
+        assert row["memory_count"] == 3
+        assert row["attempt_count"] == 1

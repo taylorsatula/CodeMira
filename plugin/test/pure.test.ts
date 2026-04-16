@@ -5,6 +5,7 @@ import {
   parseSubcorticalXml,
   formatHud,
   triggerArcGeneration,
+  triggerExtraction,
   fetchArcSummary,
   type Memory,
 } from "../src/pure.ts"
@@ -258,6 +259,16 @@ describe("triggerArcGeneration", () => {
 
   test("does not throw on connection refused", () => {
     triggerArcGeneration("http://localhost:1", "ses_123", "/tmp/proj")
+  })
+})
+
+describe("triggerExtraction", () => {
+  test("fires POST without throwing", () => {
+    triggerExtraction("http://localhost:1", "ses_123", "/tmp/proj")
+  })
+
+  test("does not throw on connection refused", () => {
+    triggerExtraction("http://localhost:1", "ses_123", "/tmp/proj")
   })
 })
 

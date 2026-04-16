@@ -7,8 +7,10 @@ Concept-by-concept mapping between Mira (`../botwithmemory`) and CodeMira. Each 
 ## 1. The trigger: "this conversation segment is done, time to extract"
 
 - **Mira**: `SegmentTimeoutEvent` (120 min inactivity) → `cns/.../segment_collapse_handler.py:collapse_segment()` — in-process event bus.
-- **CodeMira**: launchd-driven poll loop `daemon/codemira/daemon.py:run_daemon` → `find_idle_sessions()` in `daemon/codemira/opencode_db.py:42` (idle threshold from `DaemonConfig`) → `process_idle_session()` at `daemon/codemira/daemon.py:45`.
-- *Pin*: same idea — "user stopped, now we sleep-process" — but external polling replaces in-process events because the daemon doesn't share a runtime with OpenCode.
+- **CodeMira**: two paths, both terminate at `process_idle_session()` (`daemon/codemira/daemon.py:46`):
+  - **Idle poll**: launchd-driven `daemon/codemira/daemon.py:run_daemon` → `find_idle_sessions()` in `daemon/codemira/opencode_db.py:42` (idle threshold from `DaemonConfig`).
+  - **Compaction-triggered**: plugin `event` hook in `plugin/src/index.ts` watches OpenCode's `session.compacted` bus event → POSTs `/extract` on the daemon → `RetrieveHandler._extract_session` (`daemon/codemira/server.py`) spawns a background thread.
+- *Pin*: same idea — "this conversation segment is done, now extract" — but split across two triggers because the daemon doesn't share a runtime with OpenCode and we don't want to lose the original messages to compaction before the polling cycle gets to them.
 
 ## 2. Extraction orchestrator
 

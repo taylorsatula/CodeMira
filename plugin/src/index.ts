@@ -7,6 +7,7 @@ import {
   parseSubcorticalXml,
   formatHud,
   triggerArcGeneration,
+  triggerExtraction,
   fetchArcSummary,
   type Memory,
 } from "./pure.ts"
@@ -38,7 +39,7 @@ interface Hooks {
     input: {},
     output: { messages: { info: any; parts: any[] }[] },
   ) => Promise<void>
-  event?: (input: { event: any }) => Promise<void>
+  event?: (input: { event: { type: string; properties: any } }) => Promise<void>
 }
 
 const DEFAULT_OPTIONS: Required<PluginOptions> = {
@@ -220,6 +221,13 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           daemonUnavailable = true
         }
       }
+    },
+    event: async ({ event }) => {
+      if (daemonUnavailable) return
+      if (event?.type !== "session.compacted") return
+      const sessionID = event.properties?.sessionID
+      if (!sessionID) return
+      triggerExtraction(config.daemonUrl, sessionID, input.worktree)
     },
   }
 }
