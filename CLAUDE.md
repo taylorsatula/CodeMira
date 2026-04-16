@@ -11,6 +11,9 @@ Memory stores are per-project at `<project-worktree>/.codememory/memories.db` (+
 
 The User's name is Taylor.
 
+## 🧬 Lineage Context (Read First)
+Before any codebase investigation — exploring architecture, modifying prompts, changing extraction/retrieval behavior, or interpreting Taylor's requests — **read `mira_lineage.md` first**. It maps every CodeMira subsystem back to its ancestor in Mira (`../botwithmemory`). Taylor often uses Mira vocabulary (e.g., "entities," "subcortical," "segment collapse") and expects you to resolve it to the correct CodeMira file without asking.
+
 ## 🗺️ Nested CLAUDE.md Maintenance (Mandatory)
 Subdirectories may contain `CLAUDE.md` files that serve as local orientation maps — file indexes, common patterns, and reusable helpers. **These are loaded automatically when you read files in that subtree.** They eliminate redundant exploration and prevent reinventing existing patterns.
 
@@ -104,7 +107,7 @@ All LLM prompts live in `prompts/*.txt` and are loaded via `load_prompt(name, pr
 All Ollama calls go through `call_ollama()` in `daemon/codemira/extraction/compressor.py` using `urllib.request`. No `ollama-python` dependency. The plugin side uses `fetch()` for the same reason (stdlib everywhere).
 
 ### Entity Extraction is LLM-Based
-`daemon/codemira/extraction/dedup.py:extract_entities` calls `gemma4:e2b` via Ollama with `prompts/entity_extraction_*.txt`. The model returns a JSON array of `{name, type}` entries. `name` is lowercased and deduped; `type` is validated against `VALID_ENTITY_TYPES` and falls back to `"other"`. Callers pass `model`, `ollama_url`, and `prompts_dir` explicitly — there are no defaults.
+`daemon/codemira/extraction/dedup.py:extract_entities` calls `gemma4:e2b` via Ollama with `prompts/entity_extraction_*.txt`. The model returns a JSON array of `{name, type}` entries. `name` is lowercased and deduped; `type` is validated against `VALID_ENTITY_TYPES` and falls back to `"other"`. `VALID_ENTITY_TYPES` = `{library, framework, tool, pattern, protocol, error, project_concept, other}`. Project-specific named concepts (modules, subsystems, project-internal terms like "peanutgallery", "domaindocs") are `project_concept` — the highest-value entity type for hub discovery because they link to `vocabulary` category memories that ecosystem terms cannot surface. Callers pass `model`, `ollama_url`, and `prompts_dir` explicitly — there are no defaults.
 
 ### Hybrid Retrieval
 `HybridSearcher.hybrid_search()` issues BM25 (via FTS5) + ANN (via hnswlib) with `limit * 2` each, merges via Reciprocal Rank Fusion (`RRF_K=60`), and caps at `limit`. Fresh search results are augmented by `hub_discovery()` (entity-indexed + link-graph memories) and pinned memories from the previous iteration. Final cap: `max_surfaced_memories` (default 8).
