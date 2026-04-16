@@ -86,10 +86,16 @@ export function parseSubcorticalXml(xml: string): {
   return { query_expansion, entities, keep }
 }
 
-export function formatHud(memories: Memory[], truncWords: number): string {
-  if (memories.length === 0) return ""
-  const lines = memories.map((m) => formatMemoryLine(m, truncWords)).join("\n")
-  return `<developer_context>\n${lines}\n</developer_context>`
+export function formatHud(memories: Memory[], toolTrace: string[], truncWords: number): string {
+  if (memories.length === 0 && toolTrace.length === 0) return ""
+  const sections: string[] = []
+  if (toolTrace.length > 0) {
+    sections.push(`<recent_actions>\n${toolTrace.join("\n")}\n</recent_actions>`)
+  }
+  if (memories.length > 0) {
+    sections.push(memories.map((m) => formatMemoryLine(m, truncWords)).join("\n"))
+  }
+  return `<developer_context>\n${sections.join("\n")}\n</developer_context>`
 }
 
 export function triggerArcGeneration(
