@@ -1,10 +1,16 @@
-You extract named technical concepts from a developer memory note. Output a JSON array.
+You extract named concepts from a developer memory note. Output a JSON array.
 
 Each entity is an object with:
-- name: lowercase normalized form of the concept (e.g., "fastapi", "pytest", "docker", "connectionrefusederror")
-- type: one of library, framework, tool, pattern, protocol, error, other
+- name: lowercase normalized form of the concept (e.g., "fastapi", "pytest", "peanutgallery", "domaindocs")
+- type: one of library, framework, tool, pattern, protocol, error, project_concept, other
 
-Extract ONLY named technical concepts — things with a proper identity in the software ecosystem: libraries (pytest, sqlalchemy, react), frameworks (fastapi, flask, django, nextjs), tools (docker, webpack, git, npm), patterns (middleware, pub/sub, factory, observer), protocols (oauth, grpc, websocket, rest, graphql), errors (ConnectionRefusedError, ValidationError).
+Entity extraction in this system serves Knowledge Graph lookup — surfacing related memories when the same concept appears in a future conversation. Project-specific concepts are the highest-value signals because they link to vocabulary memories and project-internal decisions that no general-purpose term could surface.
+
+EXTRACT these categories, in strict priority order:
+
+1. HIGHEST PRIORITY: Project-specific named concepts (type: project_concept) — named modules, subsystems, components, or terms that have identity within this project but would be meaningless to an outside developer. Examples: "domaindocs", "peanutgallery", "auth module", "subcortical", "hud", "storemanager". These are things a new team member would need explained. A project-specific term that appears in the memory text is almost always a project_concept, not "other". Project-specific vernacular takes absolute precedence.
+
+2. LOWER PRIORITY: Ecosystem named concepts (types: library, framework, tool, pattern, protocol, error) — things with a proper identity in the broader software ecosystem. Libraries (pytest, sqlalchemy, react), frameworks (fastapi, flask, django, nextjs), tools (docker, webpack, git, npm), patterns (middleware, pub/sub), protocols (oauth, grpc), errors. Extract these ONLY if they act as a central hub for the memory. We all know what git or docker is — extract them only if the memory describes a specific, notable interaction with them.
 
 DO NOT extract generic terms: function, variable, class, method, callback, handler, config, model, service, helper, util, string, integer, boolean, import, module, file.
 
@@ -14,11 +20,14 @@ Output ONLY the JSON array. No preamble, no markdown fences, no explanation.
 
 Examples:
 
-Input: "Prefers threading over asyncio for concurrent I/O"
-Output: [{"name":"threading","type":"library"},{"name":"asyncio","type":"library"}]
+Input: "The PeanutGallery is a two-stage metacognitive observer that watches MIRA's ongoing conversations against relevant memories"
+Output: [{"name":"peanutgallery","type":"project_concept"},{"name":"metacognitive observer","type":"project_concept"}]
 
 Input: "Uses FastAPI with pytest and Docker for deployment"
 Output: [{"name":"fastapi","type":"framework"},{"name":"pytest","type":"library"},{"name":"docker","type":"tool"}]
+
+Input: "The DomainDocs subsystem generates project documentation from code annotations"
+Output: [{"name":"domaindocs","type":"project_concept"}]
 
 Input: "Raises ConnectionRefusedError when Redis is unreachable"
 Output: [{"name":"connectionrefusederror","type":"error"},{"name":"redis","type":"tool"}]

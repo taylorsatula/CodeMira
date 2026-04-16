@@ -8,7 +8,7 @@ from codemira.store.index import MemoryIndex
 
 log = logging.getLogger(__name__)
 
-VALID_ENTITY_TYPES = {"library", "framework", "tool", "pattern", "protocol", "error", "other"}
+VALID_ENTITY_TYPES = {"library", "framework", "tool", "pattern", "protocol", "error", "project_concept", "other"}
 
 
 def extract_entities(
