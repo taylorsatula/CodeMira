@@ -4,53 +4,58 @@ export interface Memory {
   category: string
 }
 
+export interface RecentAction {
+  tool: string
+  target: string
+  result: string
+}
+
 export function extractCurrentTurnContext(
   messages: { info: any; parts: any[] }[],
   toolWindow: number,
-): { userMessage: string; toolTrace: string[] } {
+): { userMessage: string; recentActions: RecentAction[] } {
   let userMessage = ""
-  const toolTrace: string[] = []
+  const recentActions: RecentAction[] = []
 
-  // Traverse backwards to capture the immediate current turn
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    
+
     if (msg.info.role === "assistant") {
-      for (const part of [...msg.parts].reverse()) { // Reverse to get most recent tools first
-        if (toolTrace.length >= toolWindow) break
+      for (const part of [...msg.parts].reverse()) {
+        if (recentActions.length >= toolWindow) break
         if (part.type === "tool" && part.state?.status === "completed") {
           const tool = part.tool || "unknown"
           const input = part.state.input || {}
           const title = part.state.title || ""
           const target = input.path || input.command || input.pattern || ""
           const result = title || (part.state.output || "").slice(0, 80)
-          // Prepend so they appear in chronological order in the array
-          toolTrace.unshift(`<action tool="${tool}" target="${target}" result="${result}" />`)
+          recentActions.unshift({ tool, target, result })
         }
       }
     } else if (msg.info.role === "user") {
-      // Stop at the first real user message we hit (the start of the current turn)
       let foundRealUserMessage = false
       for (const part of msg.parts) {
         if (part.type === "text" && !part.synthetic) {
-          userMessage = part.text.slice(0, 500) // Give it a bit more breathing room
+          userMessage = part.text.slice(0, 500)
           foundRealUserMessage = true
           break
         }
       }
-      if (foundRealUserMessage) {
-        break // We found the start of the current turn, stop traversing
-      }
+      if (foundRealUserMessage) break
     }
   }
 
-  return { userMessage, toolTrace }
+  return { userMessage, recentActions }
+}
+
+function truncate(text: string, words: number): string {
+  const all = text.split(" ")
+  const taken = all.slice(0, words).join(" ")
+  return all.length > words ? `${taken}...` : taken
 }
 
 function formatMemoryLine(m: Memory, truncWords: number): string {
-  const words = m.text.split(" ").slice(0, truncWords).join(" ")
-  const suffix = m.text.split(" ").length > truncWords ? "..." : ""
-  return `mem_${m.id} - ${words}${suffix}`
+  return `mem_${m.id} - ${truncate(m.text, truncWords)}`
 }
 
 export function formatPinnedMemories(memories: Memory[], truncWords: number): string {
@@ -86,16 +91,77 @@ export function parseSubcorticalXml(xml: string): {
   return { query_expansion, entities, keep }
 }
 
-export function formatHud(memories: Memory[], toolTrace: string[], truncWords: number): string {
-  if (memories.length === 0 && toolTrace.length === 0) return ""
-  const sections: string[] = []
-  if (toolTrace.length > 0) {
-    sections.push(`<recent_actions>\n${toolTrace.join("\n")}\n</recent_actions>`)
+export interface HudItem {
+  tag: string
+  attrs?: Record<string, string>
+  content?: string
+}
+
+export interface HudSection {
+  tag: string
+  priority: number
+  items: HudItem[]
+}
+
+function escapeXmlAttr(v: string): string {
+  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;")
+}
+
+function escapeXmlText(v: string): string {
+  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+export function renderHudItem(item: HudItem): string {
+  const attrs = Object.entries(item.attrs ?? {})
+    .map(([k, v]) => `${k}="${escapeXmlAttr(v)}"`)
+    .join(" ")
+  const head = attrs ? `<${item.tag} ${attrs}` : `<${item.tag}`
+  if (item.content !== undefined) {
+    return `${head}>${escapeXmlText(item.content)}</${item.tag}>`
   }
-  if (memories.length > 0) {
-    sections.push(memories.map((m) => formatMemoryLine(m, truncWords)).join("\n"))
+  return `${head} />`
+}
+
+export function recentActionsSection(actions: RecentAction[]): HudSection {
+  return {
+    tag: "recent_actions",
+    priority: 10,
+    items: actions.map((a) => ({
+      tag: "action",
+      attrs: { tool: a.tool, target: a.target, result: a.result },
+    })),
   }
-  return `<developer_context>\n${sections.join("\n")}\n</developer_context>`
+}
+
+export function memoriesSection(memories: Memory[], truncWords: number): HudSection {
+  return {
+    tag: "memories",
+    priority: 20,
+    items: memories.map((m) => ({
+      tag: "memory",
+      attrs: { id: `mem_${m.id}`, category: m.category },
+      content: truncate(m.text, truncWords),
+    })),
+  }
+}
+
+export function formatHud(
+  sections: HudSection[],
+  options?: { loud?: boolean },
+): string {
+  const nonEmpty = sections
+    .filter((s) => s.items.length > 0)
+    .sort((a, b) => a.priority - b.priority)
+  if (nonEmpty.length === 0) return ""
+  const rendered = nonEmpty.map((s) => {
+    const body = s.items.map(renderHudItem).join("\n")
+    return `<${s.tag}>\n${body}\n</${s.tag}>`
+  })
+  const hud = `<developer_context>\n${rendered.join("\n")}\n</developer_context>`
+  if (options?.loud) {
+    console.log("[codemira:loud] HUD:\n" + hud)
+  }
+  return hud
 }
 
 export function triggerArcGeneration(

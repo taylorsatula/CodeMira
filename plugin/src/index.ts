@@ -6,6 +6,9 @@ import {
   formatPinnedMemories,
   parseSubcorticalXml,
   formatHud,
+  memoriesSection,
+  recentActionsSection,
+  renderHudItem,
   triggerArcGeneration,
   triggerExtraction,
   fetchArcSummary,
@@ -22,6 +25,7 @@ interface PluginOptions {
   subcorticalModel?: string
   toolTraceWindow?: number
   memoryTruncationWords?: number
+  loud?: boolean
 }
 
 interface PluginInput {
@@ -49,6 +53,7 @@ const DEFAULT_OPTIONS: Required<PluginOptions> = {
   subcorticalModel: "gemma4:e2b",
   toolTraceWindow: 5,
   memoryTruncationWords: 20,
+  loud: false,
 }
 
 async function callOllama(
@@ -130,9 +135,9 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
       }
 
       try {
-        const { userMessage, toolTrace } = extractCurrentTurnContext(output.messages, 20)
-        
-        if (toolTrace.length === 0 && pinnedMemories.length === 0 && !userMessage) return
+        const { userMessage, recentActions } = extractCurrentTurnContext(output.messages, 20)
+
+        if (recentActions.length === 0 && pinnedMemories.length === 0 && !userMessage) return
 
         const lastMsg = output.messages[output.messages.length - 1]
         const sessionID = lastMsg?.info?.sessionID || ""
@@ -152,12 +157,19 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           cachedArc = arcTopology
         }
 
-        const recentActions = toolTrace.join("\n")
+        const recentActionsStr = recentActions
+          .map((a) =>
+            renderHudItem({
+              tag: "action",
+              attrs: { tool: a.tool, target: a.target, result: a.result },
+            }),
+          )
+          .join("\n")
         const pinnedMemoriesStr = formatPinnedMemories(pinnedMemories, config.memoryTruncationWords)
 
         const userPrompt = subcorticalUserTemplate
           .replace("{user_message}", userMessage)
-          .replace("{recent_actions}", recentActions)
+          .replace("{recent_actions}", recentActionsStr)
           .replace("{pinned_memories}", pinnedMemoriesStr)
           .replace("{conversation_arc}", cachedArc || "None")
 
@@ -180,7 +192,13 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           input.worktree,
         )
 
-        const hudText = formatHud(memories, toolTrace, config.memoryTruncationWords)
+        const hudText = formatHud(
+          [
+            recentActionsSection(recentActions),
+            memoriesSection(memories, config.memoryTruncationWords),
+          ],
+          { loud: config.loud },
+        )
         if (!hudText) {
           pinnedMemories = []
           return

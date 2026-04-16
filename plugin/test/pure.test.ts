@@ -1,13 +1,17 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, spyOn } from "bun:test"
 import {
   extractCurrentTurnContext,
   formatPinnedMemories,
   parseSubcorticalXml,
   formatHud,
+  memoriesSection,
+  recentActionsSection,
+  renderHudItem,
   triggerArcGeneration,
   triggerExtraction,
   fetchArcSummary,
   type Memory,
+  type RecentAction,
 } from "../src/pure.ts"
 
 function makeAssistantMsg(parts: any[]): { info: any; parts: any[] } {
@@ -43,11 +47,11 @@ describe("extractCurrentTurnContext", () => {
         makeToolPart("bash", { command: "pytest" }, "3 passed", "Ran pytest"),
       ]),
     ]
-    const { userMessage, toolTrace } = extractCurrentTurnContext(messages, 20)
-    expect(toolTrace.length).toBe(1)
-    expect(toolTrace[0]).toContain('tool="bash"')
-    expect(toolTrace[0]).toContain('target="pytest"')
-    expect(toolTrace[0]).toContain('result="Ran pytest"')
+    const { userMessage, recentActions } = extractCurrentTurnContext(messages, 20)
+    expect(recentActions.length).toBe(1)
+    expect(recentActions[0].tool).toBe("bash")
+    expect(recentActions[0].target).toBe("pytest")
+    expect(recentActions[0].result).toBe("Ran pytest")
     expect(userMessage).toBe("Run the tests")
   })
 
@@ -59,8 +63,8 @@ describe("extractCurrentTurnContext", () => {
         { type: "tool", callID: "c2", tool: "read", state: { status: "running", input: { path: "file.ts" } } },
       ]),
     ]
-    const { toolTrace } = extractCurrentTurnContext(messages, 20)
-    expect(toolTrace.length).toBe(0)
+    const { recentActions } = extractCurrentTurnContext(messages, 20)
+    expect(recentActions.length).toBe(0)
   })
 
   test("respects window limit across multiple assistant messages in same turn", () => {
@@ -71,8 +75,8 @@ describe("extractCurrentTurnContext", () => {
       makeAssistantMsg([makeToolPart("bash", { command: "cmd3" }, "out3", "title3")]),
       makeAssistantMsg([makeToolPart("bash", { command: "cmd4" }, "out4", "title4")]),
     ]
-    const { toolTrace } = extractCurrentTurnContext(messages, 2)
-    expect(toolTrace.length).toBe(2)
+    const { recentActions } = extractCurrentTurnContext(messages, 2)
+    expect(recentActions.length).toBe(2)
   })
 
   test("stops at the start of the current turn", () => {
@@ -82,10 +86,10 @@ describe("extractCurrentTurnContext", () => {
       makeUserMsg("New question"),
       makeAssistantMsg([makeToolPart("bash", { command: "new_cmd" }, "out", "new")]),
     ]
-    const { userMessage, toolTrace } = extractCurrentTurnContext(messages, 20)
+    const { userMessage, recentActions } = extractCurrentTurnContext(messages, 20)
     expect(userMessage).toBe("New question")
-    expect(toolTrace.length).toBe(1)
-    expect(toolTrace[0]).toContain("new_cmd")
+    expect(recentActions.length).toBe(1)
+    expect(recentActions[0].target).toBe("new_cmd")
   })
 
   test("extracts tool target from path, command, or pattern", () => {
@@ -93,9 +97,9 @@ describe("extractCurrentTurnContext", () => {
     const cmdResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("bash", { command: "npm test" }, "ok")])], 20)
     const patResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("grep", { pattern: "TODO" }, "3 matches")])], 20)
 
-    expect(pathResult.toolTrace[0]).toContain('target="src/index.ts"')
-    expect(cmdResult.toolTrace[0]).toContain('target="npm test"')
-    expect(patResult.toolTrace[0]).toContain('target="TODO"')
+    expect(pathResult.recentActions[0].target).toBe("src/index.ts")
+    expect(cmdResult.recentActions[0].target).toBe("npm test")
+    expect(patResult.recentActions[0].target).toBe("TODO")
   })
 
   test("uses title over truncated output for result", () => {
@@ -105,9 +109,9 @@ describe("extractCurrentTurnContext", () => {
         makeToolPart("bash", { command: "ls" }, "file1.txt\nfile2.txt\nfile3.txt", "Listed files"),
       ]),
     ]
-    const { toolTrace } = extractCurrentTurnContext(messages, 20)
-    expect(toolTrace[0]).toContain('result="Listed files"')
-    expect(toolTrace[0]).not.toContain("file1.txt")
+    const { recentActions } = extractCurrentTurnContext(messages, 20)
+    expect(recentActions[0].result).toBe("Listed files")
+    expect(recentActions[0].result).not.toContain("file1.txt")
   })
 
   test("truncates user message to 500 characters", () => {
@@ -128,9 +132,9 @@ describe("extractCurrentTurnContext", () => {
 
   test("returns empty when no user messages or tool calls", () => {
     const messages = [makeAssistantMsg([])]
-    const { userMessage, toolTrace } = extractCurrentTurnContext(messages, 20)
+    const { userMessage, recentActions } = extractCurrentTurnContext(messages, 20)
     expect(userMessage).toBe("")
-    expect(toolTrace.length).toBe(0)
+    expect(recentActions.length).toBe(0)
   })
 })
 
@@ -214,69 +218,190 @@ describe("formatPinnedMemories", () => {
     expect(lines[0]).toContain("abc123")
     expect(lines[1]).toContain("def456")
   })
+})
 
-// These tests are removed because importance score was ablated
+describe("renderHudItem", () => {
+  test("renders self-closing element when content is omitted", () => {
+    const out = renderHudItem({ tag: "action", attrs: { tool: "bash", target: "pytest" } })
+    expect(out).toBe('<action tool="bash" target="pytest" />')
+  })
 
+  test("renders element with content when content is provided", () => {
+    const out = renderHudItem({ tag: "memory", attrs: { id: "mem_x" }, content: "hello" })
+    expect(out).toBe('<memory id="mem_x">hello</memory>')
+  })
+
+  test("renders bare tag when no attrs and no content", () => {
+    const out = renderHudItem({ tag: "marker" })
+    expect(out).toBe("<marker />")
+  })
+
+  test("escapes attribute special characters", () => {
+    const out = renderHudItem({ tag: "x", attrs: { v: `a & b < c "quoted"` } })
+    expect(out).toContain('v="a &amp; b &lt; c &quot;quoted&quot;"')
+  })
+
+  test("escapes text content special characters", () => {
+    const out = renderHudItem({ tag: "x", content: "a & b < c > d" })
+    expect(out).toContain(">a &amp; b &lt; c &gt; d<")
+  })
+})
+
+describe("memoriesSection", () => {
+  test("builds section with memories priority and tag", () => {
+    const section = memoriesSection([mem], 20)
+    expect(section.tag).toBe("memories")
+    expect(section.priority).toBe(20)
+    expect(section.items.length).toBe(1)
+  })
+
+  test("each item carries id, category, and truncated content", () => {
+    const section = memoriesSection([mem], 20)
+    const item = section.items[0]
+    expect(item.tag).toBe("memory")
+    expect(item.attrs?.id).toBe("mem_abc123")
+    expect(item.attrs?.category).toBe("priority")
+    expect(item.content).toBe("Prefers threading over asyncio for concurrent I/O")
+  })
+
+  test("truncates content to configured word count", () => {
+    const longMem: Memory = { ...mem, text: "word ".repeat(30).trim() }
+    const section = memoriesSection([longMem], 10)
+    expect(section.items[0].content).toContain("...")
+  })
+
+  test("returns empty items array for empty input", () => {
+    const section = memoriesSection([], 20)
+    expect(section.items).toEqual([])
+  })
+})
+
+describe("recentActionsSection", () => {
+  test("builds section with recent_actions priority and tag", () => {
+    const actions: RecentAction[] = [{ tool: "bash", target: "pytest", result: "ok" }]
+    const section = recentActionsSection(actions)
+    expect(section.tag).toBe("recent_actions")
+    expect(section.priority).toBe(10)
+    expect(section.items.length).toBe(1)
+  })
+
+  test("each item carries tool, target, result as attributes and no content", () => {
+    const actions: RecentAction[] = [{ tool: "bash", target: "pytest", result: "ok" }]
+    const section = recentActionsSection(actions)
+    const item = section.items[0]
+    expect(item.tag).toBe("action")
+    expect(item.attrs?.tool).toBe("bash")
+    expect(item.attrs?.target).toBe("pytest")
+    expect(item.attrs?.result).toBe("ok")
+    expect(item.content).toBeUndefined()
+  })
+
+  test("returns empty items array for empty input", () => {
+    expect(recentActionsSection([]).items).toEqual([])
+  })
 })
 
 describe("formatHud", () => {
-  test("returns empty string when both memories and tool trace are empty", () => {
-    expect(formatHud([], [], 20)).toBe("")
+  test("returns empty string when all sections are empty", () => {
+    expect(formatHud([])).toBe("")
+    expect(formatHud([memoriesSection([], 20), recentActionsSection([])])).toBe("")
   })
 
   test("wraps output in developer_context tags", () => {
-    const result = formatHud([mem], [], 20)
+    const result = formatHud([memoriesSection([mem], 20)])
     expect(result).toContain("<developer_context>")
     expect(result).toContain("</developer_context>")
   })
 
-  test("includes memory ID and text", () => {
-    const result = formatHud([mem], [], 20)
-    expect(result).toContain("mem_abc123")
+  test("renders memories as <memory> elements with id and content", () => {
+    const result = formatHud([memoriesSection([mem], 20)])
+    expect(result).toContain('id="mem_abc123"')
     expect(result).toContain("Prefers threading over asyncio for concurrent I/O")
   })
 
-  test("formats multiple memories within tags", () => {
-    const mem2: Memory = { id: "def456", text: "Uses Docker for deployment", category: "priority" }
-    const result = formatHud([mem, mem2], [], 20)
-    expect(result).toContain("abc123")
-    expect(result).toContain("def456")
-    const inner = result.replace("<developer_context>\n", "").replace("\n</developer_context>", "")
-    expect(inner.split("\n").length).toBe(2)
+  test("wraps memory items in <memories> section tag", () => {
+    const result = formatHud([memoriesSection([mem], 20)])
+    expect(result).toContain("<memories>")
+    expect(result).toContain("</memories>")
   })
 
-  test("truncates within HUD", () => {
+  test("renders multiple memory items each as its own element", () => {
+    const mem2: Memory = { id: "def456", text: "Uses Docker for deployment", category: "priority" }
+    const result = formatHud([memoriesSection([mem, mem2], 20)])
+    const memoryCount = (result.match(/<memory /g) ?? []).length
+    expect(memoryCount).toBe(2)
+    expect(result).toContain("abc123")
+    expect(result).toContain("def456")
+  })
+
+  test("truncates memory content within HUD", () => {
     const longMem: Memory = { ...mem, text: "word ".repeat(30).trim() }
-    const result = formatHud([longMem], [], 10)
+    const result = formatHud([memoriesSection([longMem], 10)])
     expect(result).toContain("...")
   })
 
-  test("renders tool trace inside recent_actions section", () => {
-    const trace = [
-      '<action tool="bash" target="pytest" result="Ran pytest" />',
-      '<action tool="read" target="src/index.ts" result="Read file" />',
+  test("renders recent actions section alongside memories", () => {
+    const actions: RecentAction[] = [
+      { tool: "bash", target: "pytest", result: "Ran pytest" },
+      { tool: "read", target: "src/index.ts", result: "Read file" },
     ]
-    const result = formatHud([mem], trace, 20)
+    const result = formatHud([recentActionsSection(actions), memoriesSection([mem], 20)])
     expect(result).toContain("<recent_actions>")
     expect(result).toContain("</recent_actions>")
     expect(result).toContain('tool="bash"')
     expect(result).toContain('tool="read"')
     expect(result).toContain("mem_abc123")
-    expect(result.indexOf("<recent_actions>")).toBeLessThan(result.indexOf("mem_abc123"))
+  })
+
+  test("orders sections by priority regardless of caller argument order", () => {
+    const actions: RecentAction[] = [{ tool: "bash", target: "ls", result: "ok" }]
+    const result = formatHud([memoriesSection([mem], 20), recentActionsSection(actions)])
+    expect(result.indexOf("<recent_actions>")).toBeLessThan(result.indexOf("<memories>"))
   })
 
   test("renders HUD with only tool trace when memories are empty", () => {
-    const trace = ['<action tool="bash" target="ls" result="Listed files" />']
-    const result = formatHud([], trace, 20)
+    const actions: RecentAction[] = [{ tool: "bash", target: "ls", result: "Listed files" }]
+    const result = formatHud([recentActionsSection(actions), memoriesSection([], 20)])
     expect(result).toContain("<developer_context>")
     expect(result).toContain("<recent_actions>")
     expect(result).toContain('tool="bash"')
-    expect(result).not.toContain("mem_")
+    expect(result).not.toContain("<memories>")
   })
 
   test("omits recent_actions section when tool trace is empty", () => {
-    const result = formatHud([mem], [], 20)
+    const result = formatHud([recentActionsSection([]), memoriesSection([mem], 20)])
     expect(result).not.toContain("<recent_actions>")
+  })
+
+  test("escapes special characters in memory content", () => {
+    const dangerous: Memory = { id: "x1", text: "uses <script>alert(1)</script> & stuff", category: "priority" }
+    const result = formatHud([memoriesSection([dangerous], 20)])
+    expect(result).toContain("&lt;script&gt;")
+    expect(result).toContain("&amp;")
+    expect(result).not.toContain("<script>")
+  })
+
+  test("logs rendered HUD when loud option is true", () => {
+    const spy = spyOn(console, "log").mockImplementation(() => {})
+    try {
+      formatHud([memoriesSection([mem], 20)], { loud: true })
+      expect(spy).toHaveBeenCalled()
+      const call = spy.mock.calls[0][0] as string
+      expect(call).toContain("[codemira:loud] HUD:")
+      expect(call).toContain("<developer_context>")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  test("does not log when loud option is omitted", () => {
+    const spy = spyOn(console, "log").mockImplementation(() => {})
+    try {
+      formatHud([memoriesSection([mem], 20)])
+      expect(spy).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

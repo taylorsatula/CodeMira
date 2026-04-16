@@ -143,6 +143,9 @@ The `extraction_log` table (`session_id`, `extracted_at`, `memory_count`, `attem
 ### HUD Injection
 The plugin generates fresh `msg_<26hex>` / `prt_<26hex>` IDs on every call (via `randomBytes(13).toString("hex")`) and pushes a `user` message with a synthetic text part containing the HUD. The IDs never touch OpenCode's DB — they live only in the in-memory `output.messages` array the hook mutates. No cleanup logic; messages are re-fetched from DB every iteration, so stale HUDs can't accumulate.
 
+### HUD Section Contract
+The HUD is the single chokepoint for everything `<developer_context>` carries to the LLM. `formatHud(sections, options?)` in `plugin/src/pure.ts` takes a list of `HudSection` objects (`{tag, priority, items}`) and renders them inside `<developer_context>`. Sections are sorted by `priority` (lower = earlier), empty sections drop, all items render through `renderHudItem` which XML-escapes attributes and text content. Current sections: `recentActionsSection` (priority 10, from `RecentAction[]`) and `memoriesSection` (priority 20, from `Memory[]`). To add a new section: write a `*Section(data): HudSection` helper in `pure.ts`, pick a priority integer (use gaps of 10 so future sections can slot between), and add one line to the `formatHud` call in `plugin/src/index.ts`. Do not XML-escape by hand or build ad-hoc item strings — route everything through `renderHudItem`. `formatHud({loud: true})` logs the rendered HUD to stdout for debugging.
+
 ## ⚡ Performance & Tool Usage
 - **Synchronous Python**: Daemon is single-threaded polling + a single-threaded `HTTPServer`. No `async`. Keep it simple until profiling demands otherwise.
 - **Plugin is async-native**: OpenCode's Bun runtime is async; the hook uses `fetch()` naturally. Don't spawn subprocesses from the plugin.
