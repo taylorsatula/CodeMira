@@ -6,4 +6,4 @@
 {existing_memories}
 </existing_memories>
 
-Extract memories from this conversation. Return JSON array.
+Extract memories from this conversation. Return ONLY the JSON array. No preamble.
