@@ -63,6 +63,25 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                 args=(session_id, project_dir),
                 daemon=True,
             ).start()
+        elif self.path == "/extract":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                self._send_json(400, json.dumps({"error": "invalid json"}))
+                return
+            session_id = data.get("session_id", "")
+            project_dir = data.get("project_dir", "")
+            if not session_id or not project_dir:
+                self._send_json(400, json.dumps({"error": "session_id and project_dir required"}))
+                return
+            self._send_json(202, json.dumps({"status": "extracting"}))
+            threading.Thread(
+                target=self._extract_session,
+                args=(session_id, project_dir),
+                daemon=True,
+            ).start()
         elif self.path == "/retrieve":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
@@ -103,6 +122,28 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                 self._send_json(500, json.dumps({"error": str(e)}))
         else:
             self._send_json(404, json.dumps({"error": "not found"}))
+
+    def _extract_session(self, session_id: str, project_dir: str):
+        try:
+            memory_conn, _ = self.manager.get(project_dir)
+            from codemira.store.db import is_session_extracted
+            if is_session_extracted(memory_conn, session_id):
+                return
+            import os
+            from codemira.opencode_db import discover_opencode_db, open_opencode_db
+            opencode_db_path = discover_opencode_db(self.config.opencode_db_path)
+            opencode_conn = open_opencode_db(opencode_db_path)
+            try:
+                from codemira.daemon import process_idle_session
+                prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "prompts")
+                process_idle_session(
+                    session_id, project_dir, opencode_conn, self.manager,
+                    self.config, prompts_dir, os.environ["OPENROUTER_API_KEY"],
+                )
+            finally:
+                opencode_conn.close()
+        except Exception as e:
+            log.error("Compaction-triggered extraction failed for session %s: %s", session_id, e)
 
     def _generate_arc(self, session_id: str, project_dir: str):
         try:
