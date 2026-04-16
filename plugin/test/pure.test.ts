@@ -219,25 +219,25 @@ describe("formatPinnedMemories", () => {
 })
 
 describe("formatHud", () => {
-  test("returns empty string for empty list", () => {
-    expect(formatHud([], 20)).toBe("")
+  test("returns empty string when both memories and tool trace are empty", () => {
+    expect(formatHud([], [], 20)).toBe("")
   })
 
   test("wraps output in developer_context tags", () => {
-    const result = formatHud([mem], 20)
+    const result = formatHud([mem], [], 20)
     expect(result).toContain("<developer_context>")
     expect(result).toContain("</developer_context>")
   })
 
   test("includes memory ID and text", () => {
-    const result = formatHud([mem], 20)
+    const result = formatHud([mem], [], 20)
     expect(result).toContain("mem_abc123")
     expect(result).toContain("Prefers threading over asyncio for concurrent I/O")
   })
 
   test("formats multiple memories within tags", () => {
     const mem2: Memory = { id: "def456", text: "Uses Docker for deployment", category: "priority" }
-    const result = formatHud([mem, mem2], 20)
+    const result = formatHud([mem, mem2], [], 20)
     expect(result).toContain("abc123")
     expect(result).toContain("def456")
     const inner = result.replace("<developer_context>\n", "").replace("\n</developer_context>", "")
@@ -246,8 +246,36 @@ describe("formatHud", () => {
 
   test("truncates within HUD", () => {
     const longMem: Memory = { ...mem, text: "word ".repeat(30).trim() }
-    const result = formatHud([longMem], 10)
+    const result = formatHud([longMem], [], 10)
     expect(result).toContain("...")
+  })
+
+  test("renders tool trace inside recent_actions section", () => {
+    const trace = [
+      '<action tool="bash" target="pytest" result="Ran pytest" />',
+      '<action tool="read" target="src/index.ts" result="Read file" />',
+    ]
+    const result = formatHud([mem], trace, 20)
+    expect(result).toContain("<recent_actions>")
+    expect(result).toContain("</recent_actions>")
+    expect(result).toContain('tool="bash"')
+    expect(result).toContain('tool="read"')
+    expect(result).toContain("mem_abc123")
+    expect(result.indexOf("<recent_actions>")).toBeLessThan(result.indexOf("mem_abc123"))
+  })
+
+  test("renders HUD with only tool trace when memories are empty", () => {
+    const trace = ['<action tool="bash" target="ls" result="Listed files" />']
+    const result = formatHud([], trace, 20)
+    expect(result).toContain("<developer_context>")
+    expect(result).toContain("<recent_actions>")
+    expect(result).toContain('tool="bash"')
+    expect(result).not.toContain("mem_")
+  })
+
+  test("omits recent_actions section when tool trace is empty", () => {
+    const result = formatHud([mem], [], 20)
+    expect(result).not.toContain("<recent_actions>")
   })
 })
 

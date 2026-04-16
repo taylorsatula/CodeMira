@@ -179,13 +179,11 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           input.worktree,
         )
 
-        if (memories.length === 0) {
+        const hudText = formatHud(memories, toolTrace, config.memoryTruncationWords)
+        if (!hudText) {
           pinnedMemories = []
           return
         }
-
-        const hudText = formatHud(memories, config.memoryTruncationWords)
-        if (!hudText) return
 
         const agent = lastMsg?.info?.agent || "code"
         const model = lastMsg?.info?.model || { providerID: "anthropic", modelID: "claude-sonnet-4-20250514" }
