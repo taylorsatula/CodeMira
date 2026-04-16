@@ -134,8 +134,8 @@ class TestArcGetEndpoint:
 
     def test_arc_returns_stored_topology(self, server_setup):
         base_url, conn, mi, ids, embs, config, project_dir = server_setup
-        from codemira.store.db import upsert_arc_summary
-        upsert_arc_summary(conn, "ses_test", "[START] Goal: Fix bug\n └─ [CURRENT] Done", 10)
+        from codemira.store.db import upsert_arc_fragment
+        upsert_arc_fragment(conn, "ses_test", 0, "[START] Goal: Fix bug\n └─ [CURRENT] Done", "hash1", 10)
         resp = urllib.request.urlopen(f"{base_url}/arc?session_id=ses_test&project_dir={urllib.parse.quote(project_dir)}")
         data = json.loads(resp.read())
         assert data["topology"] == "[START] Goal: Fix bug\n └─ [CURRENT] Done"

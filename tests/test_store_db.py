@@ -28,8 +28,10 @@ from codemira.store.db import (
     embedding_to_blob,
     blob_to_embedding,
     generate_memory_id,
-    upsert_arc_summary,
+    upsert_arc_fragment,
+    get_arc_fragments,
     get_arc_summary,
+    delete_arc_fragments_from,
 )
 
 
@@ -321,12 +323,12 @@ class TestGetExistingMemoryTexts:
         assert "Active memory" in texts
 
 
-class TestArcSummaries:
+class TestArcFragments:
     def test_upsert_and_get(self, memory_db):
-        upsert_arc_summary(memory_db, "ses_abc", "[START] Goal: Fix bug\n └─ [CURRENT] Editing file", 10)
+        upsert_arc_fragment(memory_db, "ses_abc", 0, "[START] Goal: Fix bug", "abc123", 10)
+        upsert_arc_fragment(memory_db, "ses_abc", 1, " └─ [CURRENT] Editing file", "def456", 10)
         arc = get_arc_summary(memory_db, "ses_abc")
         assert arc is not None
-        assert arc["session_id"] == "ses_abc"
         assert arc["topology"] == "[START] Goal: Fix bug\n └─ [CURRENT] Editing file"
         assert arc["message_count"] == 10
         assert arc["generated_at"] is not None
@@ -334,9 +336,28 @@ class TestArcSummaries:
     def test_get_nonexistent(self, memory_db):
         assert get_arc_summary(memory_db, "ses_nonexistent") is None
 
-    def test_upsert_overwrites(self, memory_db):
-        upsert_arc_summary(memory_db, "ses_abc", "[START] Old topology", 5)
-        upsert_arc_summary(memory_db, "ses_abc", "[START] New topology", 12)
+    def test_upsert_overwrites_fragment(self, memory_db):
+        upsert_arc_fragment(memory_db, "ses_abc", 0, "[START] Old topology", "oldhash", 5)
+        upsert_arc_fragment(memory_db, "ses_abc", 0, "[START] New topology", "newhash", 12)
         arc = get_arc_summary(memory_db, "ses_abc")
         assert arc["topology"] == "[START] New topology"
         assert arc["message_count"] == 12
+
+    def test_get_fragments(self, memory_db):
+        upsert_arc_fragment(memory_db, "ses_abc", 0, "fragment0", "h0", 10)
+        upsert_arc_fragment(memory_db, "ses_abc", 1, "fragment1", "h1", 10)
+        fragments = get_arc_fragments(memory_db, "ses_abc")
+        assert len(fragments) == 2
+        assert fragments[0]["fragment_index"] == 0
+        assert fragments[0]["content_hash"] == "h0"
+        assert fragments[1]["fragment_index"] == 1
+
+    def test_delete_fragments_from(self, memory_db):
+        upsert_arc_fragment(memory_db, "ses_abc", 0, "frag0", "h0", 10)
+        upsert_arc_fragment(memory_db, "ses_abc", 1, "frag1", "h1", 10)
+        upsert_arc_fragment(memory_db, "ses_abc", 2, "frag2", "h2", 10)
+        delete_arc_fragments_from(memory_db, "ses_abc", 1)
+        arc = get_arc_summary(memory_db, "ses_abc")
+        assert arc["topology"] == "frag0"
+        fragments = get_arc_fragments(memory_db, "ses_abc")
+        assert len(fragments) == 1

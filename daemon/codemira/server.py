@@ -122,6 +122,7 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                     ollama_url=self.config.ollama_url,
                     prompts_dir=prompts_dir,
                     context_length=self.config.arc_summary_model_context_length,
+                    chunk_target_tokens=self.config.arc_chunk_target_tokens,
                 )
                 if self.config.loud and topology:
                     log.info("── Arc topology for session %s ──\n%s", session_id, topology)

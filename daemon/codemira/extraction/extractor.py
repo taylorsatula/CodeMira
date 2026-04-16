@@ -58,11 +58,18 @@ def extract_memories(
     conn,
     extraction_model: str,
     api_key: str,
+    session_id: str,
     deduplicate_text_threshold: float = 0.95,
     prompts_dir: str | None = None,
     prior_chunk_texts: list[str] | None = None,
 ) -> list[dict]:
     system_prompt = load_prompt("extraction_system", prompts_dir)
+    
+    from codemira.store.db import get_arc_summary
+    arc_data = get_arc_summary(conn, session_id)
+    conversation_arc = arc_data["topology"] if arc_data else "No arc available"
+    system_prompt = system_prompt.replace("{conversation_arc}", conversation_arc)
+    
     existing_texts = get_existing_memory_texts(conn)
     existing_str, combined_texts = _build_existing_memories_str(existing_texts, prior_chunk_texts)
     user_prompt = load_prompt("extraction_user", prompts_dir)

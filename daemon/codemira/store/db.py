@@ -48,11 +48,14 @@ CREATE TABLE IF NOT EXISTS extraction_log (
     is_complete INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS arc_summaries (
-    session_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS arc_fragments (
+    session_id TEXT,
+    fragment_index INTEGER,
     topology TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
     message_count INTEGER NOT NULL,
-    generated_at TEXT NOT NULL
+    generated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, fragment_index)
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(text, content='memories', content_rowid='rowid');
@@ -284,20 +287,48 @@ def get_existing_memory_texts(conn: sqlite3.Connection) -> list[str]:
     return [r["text"] for r in rows]
 
 
-def upsert_arc_summary(conn: sqlite3.Connection, session_id: str, topology: str, message_count: int):
+def upsert_arc_fragment(conn: sqlite3.Connection, session_id: str, fragment_index: int, topology: str, content_hash: str, message_count: int):
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        "INSERT INTO arc_summaries (session_id, topology, message_count, generated_at) "
-        "VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(session_id) DO UPDATE SET "
+        "INSERT INTO arc_fragments (session_id, fragment_index, topology, content_hash, message_count, generated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(session_id, fragment_index) DO UPDATE SET "
         "topology = excluded.topology, "
+        "content_hash = excluded.content_hash, "
         "message_count = excluded.message_count, "
         "generated_at = excluded.generated_at",
-        (session_id, topology, message_count, now),
+        (session_id, fragment_index, topology, content_hash, message_count, now),
+    )
+    conn.commit()
+
+
+def get_arc_fragments(conn: sqlite3.Connection, session_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM arc_fragments WHERE session_id = ? ORDER BY fragment_index ASC",
+        (session_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_arc_fragments_from(conn: sqlite3.Connection, session_id: str, from_index: int):
+    conn.execute(
+        "DELETE FROM arc_fragments WHERE session_id = ? AND fragment_index >= ?",
+        (session_id, from_index),
     )
     conn.commit()
 
 
 def get_arc_summary(conn: sqlite3.Connection, session_id: str) -> dict | None:
-    row = conn.execute("SELECT * FROM arc_summaries WHERE session_id = ?", (session_id,)).fetchone()
-    return dict(row) if row else None
+    rows = conn.execute(
+        "SELECT * FROM arc_fragments WHERE session_id = ? ORDER BY fragment_index ASC",
+        (session_id,),
+    ).fetchall()
+    if not rows:
+        return None
+    full_topology = "\n".join(r["topology"] for r in rows)
+    last_row = rows[-1]
+    return {
+        "topology": full_topology,
+        "message_count": last_row["message_count"],
+        "generated_at": last_row["generated_at"]
+    }

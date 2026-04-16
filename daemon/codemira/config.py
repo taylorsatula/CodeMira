@@ -14,6 +14,7 @@ class DaemonConfig(BaseSettings):
     subcortical_model: str = "gemma4:e2b"
     extraction_model: str = "z-ai/glm-5.1"
     extraction_model_context_length: int = 128000
+    extraction_chunk_target_tokens: int = 75_000
     consolidation_interval_hours: int = 24
     consolidation_model: str = "gemma4:e4b"
     consolidation_similarity_threshold: float = 0.85
@@ -29,6 +30,7 @@ class DaemonConfig(BaseSettings):
     # Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
     arc_summary_model: str = "gemma4:e2b"
     arc_summary_model_context_length: int = 128000
+    arc_chunk_target_tokens: int = 30_000
     loud: bool = False
 
     model_config = SettingsConfigDict(env_prefix="CODEMIRA_")

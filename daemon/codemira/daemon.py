@@ -68,13 +68,14 @@ def process_idle_session(
             chunks = chunk_compressed_transcript(
                 compressed, config.extraction_model_context_length,
                 existing_memories_token_estimate,
+                chunk_target_tokens=config.extraction_chunk_target_tokens,
             )
             all_memories: list[dict] = []
             prior_texts: list[str] = []
             for chunk in chunks:
                 chunk_memories = extract_memories(
                     chunk, memory_conn, config.extraction_model, api_key,
-                    config.deduplicate_text_threshold, prompts_dir,
+                    session_id, config.deduplicate_text_threshold, prompts_dir,
                     prior_chunk_texts=prior_texts if prior_texts else None,
                 )
                 all_memories.extend(chunk_memories)
