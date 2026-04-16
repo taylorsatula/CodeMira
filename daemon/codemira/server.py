@@ -76,6 +76,9 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                 self._send_json(400, json.dumps({"error": "project_dir required"}))
                 return
             try:
+                if self.config.loud:
+                    log.info("── Subcortical → /retrieve ──\n  query: %s\n  entities: %s",
+                             data.get("query_expansion", ""), data.get("entities", []))
                 conn, index = self.manager.get(project_dir)
                 from codemira.retrieval.proactive import retrieve
                 memories = retrieve(
@@ -92,6 +95,9 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                     {"id": m["id"], "text": m["text"], "importance": m["importance"], "category": m["category"]}
                     for m in memories
                 ]
+                if self.config.loud:
+                    log.info("  → returning %d memories: %s", len(result_memories),
+                             [m["id"] for m in result_memories])
                 self._send_json(200, json.dumps({"memories": result_memories, "degraded": False}))
             except Exception as e:
                 self._send_json(500, json.dumps({"error": str(e)}))
@@ -108,7 +114,7 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                 from codemira.summarization.handler import generate_arc_summary
                 import os
                 prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "prompts")
-                generate_arc_summary(
+                topology = generate_arc_summary(
                     session_id=session_id,
                     opencode_conn=opencode_conn,
                     memory_conn=conn,
@@ -117,6 +123,8 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                     prompts_dir=prompts_dir,
                     context_length=self.config.arc_summary_model_context_length,
                 )
+                if self.config.loud and topology:
+                    log.info("── Arc topology for session %s ──\n%s", session_id, topology)
             finally:
                 opencode_conn.close()
         except Exception as e:

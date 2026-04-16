@@ -119,6 +119,10 @@ def process_idle_session(
         memory_index.rebuild_after_write(memory_conn)
         log_extraction(memory_conn, session_id, stored_count)
         log.info("Extracted %d memories from session %s (project=%s)", stored_count, session_id, project_root)
+        if config.loud and memories:
+            log.info("── Extraction results for session %s: %d extracted, %d stored ──", session_id, len(memories), stored_count)
+            for m in memories:
+                log.info("  [%s/%.1f] %s", m.get("category", "?"), m.get("importance", 0.5), m["text"][:200])
     except Exception:
         attempt_count = log_extraction(memory_conn, session_id, 0, is_complete=False)
         if attempt_count >= config.max_extraction_attempts:
@@ -161,7 +165,10 @@ def run_daemon(config: DaemonConfig | None = None):
             idle_sessions = find_idle_sessions(opencode_conn, extracted_ids, config.idle_threshold_minutes)
             api_key = os.environ.get("OPENROUTER_API_KEY", "")
             if not api_key:
-                log.error("OPENROUTER_API_KEY not set — extraction will fail")
+                if idle_sessions:
+                    log.error("OPENROUTER_API_KEY not set — skipping %d idle session(s)", len(idle_sessions))
+                opencode_conn.close()
+                continue
             for session in idle_sessions:
                 if not session["project_root"]:
                     log.warning("Skipping session %s: no project_root", session["id"])
@@ -190,13 +197,21 @@ def run_daemon(config: DaemonConfig | None = None):
                     log.error("Consolidation error: %s", e)
         except FileNotFoundError:
             log.debug("OpenCode DB not found, waiting")
-        except Exception as e:
-            log.error("Daemon loop error: %s", e)
+        except Exception:
+            log.exception("Daemon loop error")
         time.sleep(config.poll_interval_minutes * 60)
 
 
 def main():
-    config = DaemonConfig()
+    import argparse
+    parser = argparse.ArgumentParser(description="CodeMira daemon")
+    parser.add_argument("--loud", action="store_true",
+                        help="Log extraction results, arc topologies, and subcortical queries")
+    args = parser.parse_args()
+    overrides = {}
+    if args.loud:
+        overrides["loud"] = True
+    config = DaemonConfig(**overrides)
     run_daemon(config)
 
 

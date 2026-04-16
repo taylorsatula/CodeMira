@@ -44,7 +44,8 @@ interface Hooks {
 const DEFAULT_OPTIONS: Required<PluginOptions> = {
   daemonUrl: "http://localhost:9473",
   ollamaUrl: "http://localhost:11434",
-  subcorticalModel: "gemma-4-e2b-q4",
+  // Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
+  subcorticalModel: "gemma4:e2b",
   toolTraceWindow: 5,
   memoryTruncationWords: 20,
 }

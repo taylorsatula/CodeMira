@@ -1,20 +1,13 @@
 import json
+import logging
 import sqlite3
-import os
 
 from codemira.store.db import archive_memory, insert_memory, get_or_create_entity, link_memory_entity, get_entities_for_memory
 from codemira.store.index import MemoryIndex
 from codemira.extraction.compressor import call_ollama
+from codemira.extraction.extractor import load_prompt
 
-
-def load_consolidation_prompt(prompts_dir: str | None = None) -> tuple[str, str]:
-    if prompts_dir is None:
-        prompts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "prompts")
-    with open(os.path.join(prompts_dir, "consolidation_system.txt")) as f:
-        system = f.read()
-    with open(os.path.join(prompts_dir, "consolidation_user.txt")) as f:
-        user = f.read()
-    return system, user
+log = logging.getLogger(__name__)
 
 
 def consolidate_cluster(
@@ -35,7 +28,8 @@ def consolidate_cluster(
         return None
     texts = [m["text"] for m in memories]
     memory_texts = "\n".join(f"- {t}" for t in texts)
-    system_prompt, user_template = load_consolidation_prompt(prompts_dir)
+    system_prompt = load_prompt("consolidation_system", prompts_dir)
+    user_template = load_prompt("consolidation_user", prompts_dir)
     user_prompt = user_template.replace("{memory_texts}", memory_texts)
     try:
         result = call_ollama(model, system_prompt, user_prompt, ollama_url)
@@ -47,7 +41,11 @@ def consolidate_cluster(
         start = result.find("{")
         end = result.rfind("}") + 1
         if start >= 0 and end > start:
-            decision = json.loads(result[start:end])
+            try:
+                decision = json.loads(result[start:end])
+            except json.JSONDecodeError:
+                log.warning("Consolidation model returned unparseable JSON: %r", result[:200])
+                return None
         else:
             return None
     if decision.get("decision") != "squash" or not decision.get("consolidated"):

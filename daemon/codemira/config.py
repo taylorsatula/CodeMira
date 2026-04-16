@@ -10,6 +10,7 @@ class DaemonConfig(BaseSettings):
     tool_trace_window: int = 5
     memory_truncation_words: int = 20
     embedding_dimension: int = 768
+    # Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
     subcortical_model: str = "gemma4:e2b"
     extraction_model: str = "z-ai/glm-5.1"
     extraction_model_context_length: int = 128000
@@ -25,7 +26,9 @@ class DaemonConfig(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     max_extraction_attempts: int = 3
     opencode_db_path: str | None = None
-    arc_summary_model: str = "gemma4:e4b"
+    # Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
+    arc_summary_model: str = "gemma4:e2b"
     arc_summary_model_context_length: int = 128000
+    loud: bool = False
 
     model_config = SettingsConfigDict(env_prefix="CODEMIRA_")

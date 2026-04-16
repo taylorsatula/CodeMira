@@ -48,16 +48,16 @@ export function extractCurrentTurnContext(
   return { userMessage, toolTrace }
 }
 
+function formatMemoryLine(m: Memory, truncWords: number): string {
+  const dots = "●".repeat(Math.round(m.importance * 5)) + "○".repeat(5 - Math.round(m.importance * 5))
+  const words = m.text.split(" ").slice(0, truncWords).join(" ")
+  const suffix = m.text.split(" ").length > truncWords ? "..." : ""
+  return `mem_${m.id} [${dots}] - ${words}${suffix}`
+}
+
 export function formatPinnedMemories(memories: Memory[], truncWords: number): string {
   if (memories.length === 0) return "None"
-  return memories
-    .map((m) => {
-      const dots = "●".repeat(Math.round(m.importance * 5)) + "○".repeat(5 - Math.round(m.importance * 5))
-      const words = m.text.split(" ").slice(0, truncWords).join(" ")
-      const suffix = m.text.split(" ").length > truncWords ? "..." : ""
-      return `mem_${m.id} [${dots}] - ${words}${suffix}`
-    })
-    .join("\n")
+  return memories.map((m) => formatMemoryLine(m, truncWords)).join("\n")
 }
 
 export function parseSubcorticalXml(xml: string): {
@@ -90,14 +90,7 @@ export function parseSubcorticalXml(xml: string): {
 
 export function formatHud(memories: Memory[], truncWords: number): string {
   if (memories.length === 0) return ""
-  const lines = memories
-    .map((m) => {
-      const dots = "●".repeat(Math.round(m.importance * 5)) + "○".repeat(5 - Math.round(m.importance * 5))
-      const words = m.text.split(" ").slice(0, truncWords).join(" ")
-      const suffix = m.text.split(" ").length > truncWords ? "..." : ""
-      return `mem_${m.id} [${dots}] - ${words}${suffix}`
-    })
-    .join("\n")
+  const lines = memories.map((m) => formatMemoryLine(m, truncWords)).join("\n")
   return `<developer_context>\n${lines}\n</developer_context>`
 }
 
