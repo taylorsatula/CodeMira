@@ -51,7 +51,6 @@ def consolidate_cluster(
     if decision.get("decision") != "squash" or not decision.get("consolidated"):
         return None
     consolidated_text = decision["consolidated"]
-    importance = decision.get("importance", max(m["importance"] for m in memories))
     category = memories[0]["category"]
     all_entities = set()
     for m in memories:
@@ -59,7 +58,7 @@ def consolidate_cluster(
             all_entities.add((e["name"], e["type"]))
     from codemira.embeddings import EmbeddingsProvider
     consolidated_embedding = EmbeddingsProvider.get().encode_deep([consolidated_text])[0]
-    new_mid = insert_memory(conn, consolidated_text, importance, category, consolidated_embedding)
+    new_mid = insert_memory(conn, consolidated_text, category, consolidated_embedding)
     for name, etype in all_entities:
         eid = get_or_create_entity(conn, name, etype)
         link_memory_entity(conn, new_mid, eid)

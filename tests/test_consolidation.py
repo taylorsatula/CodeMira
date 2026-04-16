@@ -21,7 +21,7 @@ def cluster_setup(tmpdir_path, memory_db):
     ]
     vecs = similar_vecs + [different_vec]
     for i, (text, vec) in enumerate(zip(texts, vecs)):
-        mid = insert_memory(memory_db, text, 0.5 + i * 0.1, "priority", vec.tolist())
+        mid = insert_memory(memory_db, text, "priority", vec.tolist())
         ids.append(mid)
     index_path = os.path.join(tmpdir_path, "memories.index")
     mi = MemoryIndex(os.path.join(tmpdir_path, "memories.db"), index_path)

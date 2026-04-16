@@ -340,8 +340,8 @@ class TestDaemonStartup:
         manager = StoreManager(DaemonConfig())
         conn_a, _ = manager.get(proj_a)
         conn_b, _ = manager.get(proj_b)
-        insert_memory(conn_a, "proj A memory", 0.5, "priority", _make_embedding(seed=1))
-        insert_memory(conn_b, "proj B memory", 0.5, "priority", _make_embedding(seed=2))
+        insert_memory(conn_a, "proj A memory", "priority", _make_embedding(seed=1))
+        insert_memory(conn_b, "proj B memory", "priority", _make_embedding(seed=2))
         a_mems = [m["text"] for m in get_all_memories(conn_a)]
         b_mems = [m["text"] for m in get_all_memories(conn_b)]
         assert a_mems == ["proj A memory"]
@@ -381,7 +381,7 @@ class TestExtractionToRetrievalPipeline:
         from codemira.extraction.dedup import extract_entities
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         emb = _make_embedding(seed=42)
-        mid = insert_memory(memory_conn, "Uses FastAPI for REST endpoints", 0.8, "decision_rationale", emb, "ses_test")
+        mid = insert_memory(memory_conn, "Uses FastAPI for REST endpoints", "decision_rationale", emb, "ses_test")
         entities = extract_entities(
             "Uses FastAPI for REST endpoints", ENTITY_MODEL, OLLAMA_URL, prompts_dir,
         )
@@ -413,9 +413,9 @@ class TestExtractionToRetrievalPipeline:
         from codemira.retrieval.proactive import retrieve
         from codemira.config import DaemonConfig
         embs = _make_embeddings(3)
-        mid1 = insert_memory(memory_conn, "Uses FastAPI for backend", 0.7, "decision_rationale", embs[0], "ses_a")
-        mid2 = insert_memory(memory_conn, "Prefers FastAPI over Flask", 0.6, "rejected_alternative", embs[1], "ses_a")
-        mid3 = insert_memory(memory_conn, "Deploy with Docker on AWS", 0.5, "priority", embs[2], "ses_a")
+        mid1 = insert_memory(memory_conn, "Uses FastAPI for backend", "decision_rationale", embs[0], "ses_a")
+        mid2 = insert_memory(memory_conn, "Prefers FastAPI over Flask", "rejected_alternative", embs[1], "ses_a")
+        mid3 = insert_memory(memory_conn, "Deploy with Docker on AWS", "priority", embs[2], "ses_a")
         eid = get_or_create_entity(memory_conn, "fastapi", "framework")
         link_memory_entity(memory_conn, mid1, eid)
         link_memory_entity(memory_conn, mid2, eid)
@@ -450,7 +450,7 @@ class TestExtractionToRetrievalPipeline:
         manager = StoreManager(DaemonConfig())
         conn, _ = manager.get(project_dir)
         emb = _make_embedding(seed=42)
-        mid = insert_memory(conn, "Prefers threading over asyncio", 0.8, "priority", emb, "ses_int")
+        mid = insert_memory(conn, "Prefers threading over asyncio", "priority", emb, "ses_int")
         conn2, idx = manager.get(project_dir)
         idx.rebuild_after_write(conn2)
         config = DaemonConfig(http_port=0)
@@ -490,7 +490,7 @@ class TestDedupDuringStore:
         from codemira.store.index import MemoryIndex
         from codemira.extraction.dedup import is_duplicate_vector
         emb = _make_embedding(seed=42)
-        mid = insert_memory(memory_conn, "Prefers threading over asyncio", 0.8, "priority", emb, "ses_dedup")
+        mid = insert_memory(memory_conn, "Prefers threading over asyncio", "priority", emb, "ses_dedup")
         index_path = os.path.join(tmpdir, "memories.index")
         mi = MemoryIndex(os.path.join(tmpdir, "memories.db"), index_path)
         mi.build_from_db(memory_conn)
@@ -514,7 +514,7 @@ class TestEntityExtractionAndLinking:
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         text = "Uses FastAPI with Docker for deployment and pytest for testing"
         emb = _make_embedding()
-        mid = insert_memory(memory_conn, text, 0.7, "priority", emb, "ses_entity")
+        mid = insert_memory(memory_conn, text, "priority", emb, "ses_entity")
         entities = extract_entities(text, ENTITY_MODEL, OLLAMA_URL, prompts_dir)
         entity_names = {e["name"] for e in entities}
         assert entity_names & {"fastapi", "docker", "pytest"}, f"Expected at least one of fastapi/docker/pytest, got {entity_names}"
@@ -653,7 +653,7 @@ class TestOpenRouterExtraction:
         _, memory_conn, tmpdir, _ = opencode_setup
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         emb = _make_embedding()
-        insert_memory(memory_conn, "User prefers FastAPI for REST APIs", 0.8, "priority", emb)
+        insert_memory(memory_conn, "User prefers FastAPI for REST APIs", "priority", emb)
         compressed = "User chose FastAPI for building their REST API project."
         memories = extract_memories(
             compressed, memory_conn,

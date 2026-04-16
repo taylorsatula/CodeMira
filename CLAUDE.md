@@ -157,7 +157,7 @@ When modifying files, write as if the new code was always the plan. Never refere
 
 ### Commands
 - **Inspect a project's memory store**:
-  `sqlite3 <worktree>/.codememory/memories.db "SELECT id, category, importance, substr(text,1,80) FROM memories WHERE is_archived=0 ORDER BY importance DESC LIMIT 20;"`
+  `sqlite3 <worktree>/.codememory/memories.db "SELECT id, category, substr(text,1,80) FROM memories WHERE is_archived=0 LIMIT 20;"`
 - **Inspect OpenCode sessions** (macOS):
   `sqlite3 "$HOME/Library/Application Support/opencode/opencode.db" "SELECT id, time_updated FROM session ORDER BY time_updated DESC LIMIT 10;"`
 - **Daemon logs**: `tail -f ~/Library/Logs/codemira/daemon.log`

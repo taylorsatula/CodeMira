@@ -32,7 +32,7 @@ function makeToolPart(tool: string, input: Record<string, string>, output: strin
   }
 }
 
-const mem: Memory = { id: "abc123", text: "Prefers threading over asyncio for concurrent I/O", importance: 0.8, category: "priority" }
+const mem: Memory = { id: "abc123", text: "Prefers threading over asyncio for concurrent I/O", category: "priority" }
 
 describe("extractCurrentTurnContext", () => {
   test("extracts completed tool calls and user message for the current turn", () => {
@@ -187,10 +187,9 @@ describe("formatPinnedMemories", () => {
     expect(formatPinnedMemories([], 20)).toBe("None")
   })
 
-  test("formats single memory with correct importance dots", () => {
+  test("formats single memory", () => {
     const result = formatPinnedMemories([mem], 20)
     expect(result).toContain("mem_abc123")
-    expect(result).toContain("●●●●○")
     expect(result).toContain("Prefers threading over asyncio for concurrent I/O")
   })
 
@@ -207,7 +206,7 @@ describe("formatPinnedMemories", () => {
   })
 
   test("formats multiple memories on separate lines", () => {
-    const mem2: Memory = { id: "def456", text: "Uses Docker for deployment", importance: 0.6, category: "decision_rationale" }
+    const mem2: Memory = { id: "def456", text: "Uses Docker for deployment", category: "decision_rationale" }
     const result = formatPinnedMemories([mem, mem2], 20)
     const lines = result.split("\n")
     expect(lines.length).toBe(2)
@@ -215,17 +214,8 @@ describe("formatPinnedMemories", () => {
     expect(lines[1]).toContain("def456")
   })
 
-  test("zero importance shows empty dots", () => {
-    const lowMem: Memory = { ...mem, importance: 0.0 }
-    const result = formatPinnedMemories([lowMem], 20)
-    expect(result).toContain("○○○○○")
-  })
+// These tests are removed because importance score was ablated
 
-  test("full importance shows full dots", () => {
-    const highMem: Memory = { ...mem, importance: 1.0 }
-    const result = formatPinnedMemories([highMem], 20)
-    expect(result).toContain("●●●●●")
-  })
 })
 
 describe("formatHud", () => {
@@ -246,7 +236,7 @@ describe("formatHud", () => {
   })
 
   test("formats multiple memories within tags", () => {
-    const mem2: Memory = { id: "def456", text: "Uses Docker for deployment", importance: 0.5, category: "priority" }
+    const mem2: Memory = { id: "def456", text: "Uses Docker for deployment", category: "priority" }
     const result = formatHud([mem, mem2], 20)
     expect(result).toContain("abc123")
     expect(result).toContain("def456")

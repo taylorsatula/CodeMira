@@ -30,11 +30,10 @@ Return a JSON object:
 {
   "decision": "squash" | "separate",
   "consolidated": "The consolidated memory text (only if decision is squash)",
-  "importance": 0.0-1.0,
   "reasoning": "Brief explanation of why you chose squash or separate"
 }
 
-If decision is "separate", consolidated should be null and importance should be null.
+If decision is "separate", consolidated should be null.
 
 Examples
 
@@ -46,7 +45,7 @@ Cluster:
 - "Prefers threading.Event and Timer patterns for concurrency, not async/await"
 
 Output:
-{"decision": "squash", "consolidated": "Prefers threading over asyncio for concurrent I/O — explicitly rejected asyncio after painful prior experience, uses threading.Event and Timer patterns", "importance": 0.9, "reasoning": "All three memories describe the same decision (threading over asyncio) with increasing specificity."}
+{"decision": "squash", "consolidated": "Prefers threading over asyncio for concurrent I/O — explicitly rejected asyncio after painful prior experience, uses threading.Event and Timer patterns", "reasoning": "All three memories describe the same decision (threading over asyncio) with increasing specificity."}
 
 Example 2: Keep separate (different decisions, shared philosophy)
 
@@ -55,7 +54,7 @@ Cluster:
 - "Prefers threading over asyncio for concurrent I/O — explicitly rejected asyncio after a prior bad experience"
 
 Output:
-{"decision": "separate", "consolidated": null, "importance": null, "reasoning": "Both reflect dependency minimalism but address different technical decisions. Squashing would require abstracting to 'prefers simple solutions' which is too vague."}
+{"decision": "separate", "consolidated": null, "reasoning": "Both reflect dependency minimalism but address different technical decisions. Squashing would require abstracting to 'prefers simple solutions' which is too vague."}
 
 Example 3: Keep separate (different categories)
 
@@ -64,4 +63,4 @@ Cluster:
 - "Prefers debug-level logging for retry/polling noise, not info-level"
 
 Output:
-{"decision": "separate", "consolidated": null, "importance": null, "reasoning": "Both relate to testing/reliability conventions but address completely different concerns."}
+{"decision": "separate", "consolidated": null, "reasoning": "Both relate to testing/reliability conventions but address completely different concerns."}

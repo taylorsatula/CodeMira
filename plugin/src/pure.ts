@@ -1,7 +1,6 @@
 export interface Memory {
   id: string
   text: string
-  importance: number
   category: string
 }
 
@@ -49,10 +48,9 @@ export function extractCurrentTurnContext(
 }
 
 function formatMemoryLine(m: Memory, truncWords: number): string {
-  const dots = "●".repeat(Math.round(m.importance * 5)) + "○".repeat(5 - Math.round(m.importance * 5))
   const words = m.text.split(" ").slice(0, truncWords).join(" ")
   const suffix = m.text.split(" ").length > truncWords ? "..." : ""
-  return `mem_${m.id} [${dots}] - ${words}${suffix}`
+  return `mem_${m.id} - ${words}${suffix}`
 }
 
 export function formatPinnedMemories(memories: Memory[], truncWords: number): string {

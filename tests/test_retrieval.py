@@ -19,7 +19,7 @@ def retrieval_setup(tmpdir_path, memory_db):
         "Rejected asyncio for the task runner",
     ]
     for i, (text, emb) in enumerate(zip(texts, embs)):
-        mid = insert_memory(memory_db, text, 0.5 + i * 0.1, "priority", emb)
+        mid = insert_memory(memory_db, text, "priority", emb)
         ids.append(mid)
     eid = get_or_create_entity(memory_db, "docker", "tool")
     link_memory_entity(memory_db, ids[1], eid)

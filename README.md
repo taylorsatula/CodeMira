@@ -113,7 +113,7 @@ Verify extraction with:
 
 ```bash
 sqlite3 <project-worktree>/.codememory/memories.db \
-  "SELECT id, category, importance, substr(text,1,80) FROM memories WHERE is_archived=0 ORDER BY importance DESC LIMIT 20;"
+  "SELECT id, category, substr(text,1,80) FROM memories WHERE is_archived=0 LIMIT 20;"
 ```
 
 Verify retrieval by hitting the daemon directly:

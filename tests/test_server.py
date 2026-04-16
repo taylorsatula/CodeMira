@@ -28,7 +28,7 @@ def server_setup(tmpdir_path):
         "Prefers raw sqlite3 over ORM",
     ]
     for i, (text, emb) in enumerate(zip(texts, embs)):
-        mid = insert_memory(conn, text, 0.5 + i * 0.1, "priority", emb)
+        mid = insert_memory(conn, text, "priority", emb)
         ids.append(mid)
     mi.rebuild_after_write(conn)
     server = create_server(manager, config, port=0)
@@ -111,7 +111,6 @@ class TestRetrieveEndpoint:
         for mem in data["memories"]:
             assert isinstance(mem["id"], str) and len(mem["id"]) > 0
             assert isinstance(mem["text"], str) and len(mem["text"]) > 0
-            assert isinstance(mem["importance"], (int, float)) and 0 <= mem["importance"] <= 1
             assert mem["category"] in ("priority", "decision_rationale", "rejected_alternative")
 
 

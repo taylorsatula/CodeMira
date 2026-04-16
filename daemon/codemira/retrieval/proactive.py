@@ -59,7 +59,6 @@ def retrieve(
             seen.add(mem["id"])
             combined.append(mem)
 
-    combined.sort(key=lambda m: m["importance"], reverse=True)
     combined = combined[:config.max_surfaced_memories]
 
     surfaced_ids = [m["id"] for m in combined]

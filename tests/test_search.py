@@ -18,7 +18,7 @@ def search_setup(tmpdir_path, memory_db):
         "Rejects asyncio for the task runner called it a mess",
     ]
     for i, (text, emb) in enumerate(zip(texts, embs)):
-        mid = insert_memory(memory_db, text, 0.5 + i * 0.1, "priority", emb)
+        mid = insert_memory(memory_db, text, "priority", emb)
         ids.append(mid)
     index_path = os.path.join(tmpdir_path, "memories.index")
     mi = MemoryIndex(os.path.join(tmpdir_path, "memories.db"), index_path)
@@ -101,7 +101,7 @@ class TestHybridSearch:
         from codemira.store.index import MemoryIndex
         from codemira.store.search import HybridSearcher
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Prefers threading over asyncio", 0.9, "priority", emb)
+        mid = insert_memory(memory_db, "Prefers threading over asyncio", "priority", emb)
         index_path = os.path.join(tmpdir_path, "memories.index")
         mi = MemoryIndex(os.path.join(tmpdir_path, "memories.db"), index_path)
         mi.build_from_db(memory_db)

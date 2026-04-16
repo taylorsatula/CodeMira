@@ -95,8 +95,8 @@ def process_idle_session(
         for mem, emb in zip(memories, embeddings):
             if is_duplicate_vector(emb, memory_index, config.deduplicate_cosine_threshold):
                 continue
-            mid = insert_memory(memory_conn, mem["text"], mem.get("importance", 0.5),
-                                mem.get("category", "priority"), emb, session_id)
+            mid = insert_memory(memory_conn, mem["text"],
+                                 mem.get("category", "priority"), emb, session_id)
             entities = extract_entities(
                 mem["text"], config.subcortical_model, config.ollama_url, prompts_dir,
             )
@@ -122,7 +122,7 @@ def process_idle_session(
         if config.loud and memories:
             log.info("── Extraction results for session %s: %d extracted, %d stored ──", session_id, len(memories), stored_count)
             for m in memories:
-                log.info("  [%s/%.1f] %s", m.get("category", "?"), m.get("importance", 0.5), m["text"][:200])
+                log.info("  [%s] %s", m.get("category", "?"), m["text"][:200])
     except Exception:
         attempt_count = log_extraction(memory_conn, session_id, 0, is_complete=False)
         if attempt_count >= config.max_extraction_attempts:

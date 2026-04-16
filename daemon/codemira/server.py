@@ -92,7 +92,7 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                     query_embedding=data.get("query_embedding"),
                 )
                 result_memories = [
-                    {"id": m["id"], "text": m["text"], "importance": m["importance"], "category": m["category"]}
+                    {"id": m["id"], "text": m["text"], "category": m["category"]}
                     for m in memories
                 ]
                 if self.config.loud:

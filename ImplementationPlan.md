@@ -308,7 +308,7 @@ For each extracted memory:
 4. **Extract entities**: Parse entity names from the memory text (libraries, frameworks, tools, patterns mentioned). Store in an entity index.
 
 5. **Store**: Write to `.codememory/memories.db`:
-   - `memories` table: id, text, importance, category, created_at, access_count, source_session_id
+    - `memories` table: id, text, category, created_at, access_count, source_session_id
    - `entities` table: id, name, type
    - `memory_entities` table: memory_id, entity_id
    - `memory_links` table: memory_id, linked_memory_id, link_type, reasoning
@@ -323,7 +323,7 @@ On a configurable schedule (default: daily), run consolidation:
 
 2. **Branch LLM call**: For each cluster, call Gemma 4 26B A4B via Ollama to determine whether memories should be squashed into one or kept separate. The model receives the cluster of memory texts and returns a merge decision with a consolidated text if squashing. No rejection tracking, no retry counters — just a binary squash-or-separate decision per cluster.
 
-3. **Execute**: If squash, create a single consolidated memory (median importance, merged entities), archive the originals, rebuild hnswlib index entries. If separate, leave them alone. No state carried forward about past merge attempts.
+3. **Execute**: If squash, create a single consolidated memory (merged entities), archive the originals, rebuild hnswlib index entries. If separate, leave them alone. No state carried forward about past merge attempts.
 
 4. **Entity GC**: Periodically merge duplicate entities (same concept, different names — e.g., "pytest" and "py.test").
 
@@ -360,7 +360,6 @@ WAL mode allows the plugin (via daemon HTTP) to read while the daemon writes. Th
 CREATE TABLE memories (
     id TEXT PRIMARY KEY,           -- UUID, 8-char hex for display
     text TEXT NOT NULL,
-    importance REAL DEFAULT 0.5,
     category TEXT NOT NULL,
     embedding BLOB NOT NULL,        -- 768-dim float32 vector, stored as blob
     source_session_id TEXT,         -- OpenCode session that generated this memory

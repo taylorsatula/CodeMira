@@ -8,7 +8,6 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
     text TEXT NOT NULL,
-    importance REAL DEFAULT 0.5,
     category TEXT NOT NULL,
     embedding BLOB,
     source_session_id TEXT,
@@ -103,7 +102,6 @@ def blob_to_embedding(blob: bytes) -> list[float]:
 def insert_memory(
     conn: sqlite3.Connection,
     text: str,
-    importance: float,
     category: str,
     embedding: list[float],
     source_session_id: str | None = None,
@@ -112,8 +110,8 @@ def insert_memory(
     now = datetime.now(timezone.utc).isoformat()
     blob = embedding_to_blob(embedding)
     conn.execute(
-        "INSERT INTO memories (id, text, importance, category, embedding, source_session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (memory_id, text, importance, category, blob, source_session_id, now, now),
+        "INSERT INTO memories (id, text, category, embedding, source_session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (memory_id, text, category, blob, source_session_id, now, now),
     )
     conn.commit()
     return memory_id
@@ -144,7 +142,7 @@ def get_all_memories(conn: sqlite3.Connection, include_archived: bool = False) -
 
 
 def update_memory(conn: sqlite3.Connection, memory_id: str, **kwargs) -> bool:
-    allowed = {"text", "importance", "category", "embedding", "access_count", "last_accessed_at", "is_archived", "archived_at"}
+    allowed = {"text", "category", "embedding", "access_count", "last_accessed_at", "is_archived", "archived_at"}
     updates = {}
     for key, value in kwargs.items():
         if key not in allowed:

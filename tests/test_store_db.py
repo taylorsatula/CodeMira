@@ -80,11 +80,10 @@ class TestSchemaInit:
 class TestMemoryCRUD:
     def test_insert_and_get(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Prefers threading over asyncio", 0.9, "rejected_alternative", emb, "ses_123")
+        mid = insert_memory(memory_db, "Prefers threading over asyncio", "rejected_alternative", emb, "ses_123")
         mem = get_memory(memory_db, mid)
         assert mem is not None
         assert mem["text"] == "Prefers threading over asyncio"
-        assert mem["importance"] == 0.9
         assert mem["category"] == "rejected_alternative"
         assert mem["source_session_id"] == "ses_123"
         assert len(mem["embedding"]) == 768
@@ -93,7 +92,7 @@ class TestMemoryCRUD:
 
     def test_insert_without_session(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Some memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Some memory", "priority", emb)
         mem = get_memory(memory_db, mid)
         assert mem["source_session_id"] is None
 
@@ -102,15 +101,15 @@ class TestMemoryCRUD:
 
     def test_get_all_memories(self, memory_db):
         emb = _make_embedding()
-        insert_memory(memory_db, "Memory 1", 0.5, "priority", emb)
-        insert_memory(memory_db, "Memory 2", 0.6, "decision_rationale", emb)
+        insert_memory(memory_db, "Memory 1", "priority", emb)
+        insert_memory(memory_db, "Memory 2", "decision_rationale", emb)
         all_mems = get_all_memories(memory_db)
         assert len(all_mems) == 2
 
     def test_get_all_excludes_archived(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory 1", 0.5, "priority", emb)
-        insert_memory(memory_db, "Memory 2", 0.6, "decision_rationale", emb)
+        mid = insert_memory(memory_db, "Memory 1", "priority", emb)
+        insert_memory(memory_db, "Memory 2", "decision_rationale", emb)
         archive_memory(memory_db, mid)
         active = get_all_memories(memory_db)
         assert len(active) == 1
@@ -118,50 +117,43 @@ class TestMemoryCRUD:
 
     def test_get_all_includes_archived(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory 1", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory 1", "priority", emb)
         archive_memory(memory_db, mid)
         all_mems = get_all_memories(memory_db, include_archived=True)
         assert len(all_mems) == 1
 
     def test_update_memory_text(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Original", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Original", "priority", emb)
         update_memory(memory_db, mid, text="Updated")
         mem = get_memory(memory_db, mid)
         assert mem["text"] == "Updated"
 
-    def test_update_memory_importance(self, memory_db):
-        emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory", 0.5, "priority", emb)
-        update_memory(memory_db, mid, importance=0.8)
-        mem = get_memory(memory_db, mid)
-        assert mem["importance"] == 0.8
-
     def test_update_memory_disallowed_field(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory", "priority", emb)
         with pytest.raises(ValueError, match="Cannot update field"):
             update_memory(memory_db, mid, id="new_id")
 
     def test_update_nonexistent_memory(self, memory_db):
         emb = _make_embedding()
-        insert_memory(memory_db, "Real memory", 0.5, "priority", emb)
+        insert_memory(memory_db, "Real memory", "priority", emb)
         assert update_memory(memory_db, "nonexistent", text="nope") is False
 
     def test_delete_memory(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory", "priority", emb)
         assert delete_memory(memory_db, mid) is True
         assert get_memory(memory_db, mid) is None
 
     def test_delete_nonexistent_memory(self, memory_db):
         emb = _make_embedding()
-        insert_memory(memory_db, "Real memory", 0.5, "priority", emb)
+        insert_memory(memory_db, "Real memory", "priority", emb)
         assert delete_memory(memory_db, "nonexistent") is False
 
     def test_delete_memory_cascades_entities(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory", "priority", emb)
         eid = get_or_create_entity(memory_db, "pytest", "tool")
         link_memory_entity(memory_db, mid, eid)
         delete_memory(memory_db, mid)
@@ -170,7 +162,7 @@ class TestMemoryCRUD:
 
     def test_archive_memory(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory", "priority", emb)
         archive_memory(memory_db, mid)
         mem = get_memory(memory_db, mid)
         assert mem["is_archived"] == 1
@@ -178,7 +170,7 @@ class TestMemoryCRUD:
 
     def test_increment_access(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory", "priority", emb)
         increment_access(memory_db, [mid])
         mem = get_memory(memory_db, mid)
         assert mem["access_count"] == 1
@@ -186,8 +178,8 @@ class TestMemoryCRUD:
 
     def test_increment_access_multiple(self, memory_db):
         emb = _make_embedding()
-        mid1 = insert_memory(memory_db, "Memory 1", 0.5, "priority", emb)
-        mid2 = insert_memory(memory_db, "Memory 2", 0.5, "priority", emb)
+        mid1 = insert_memory(memory_db, "Memory 1", "priority", emb)
+        mid2 = insert_memory(memory_db, "Memory 2", "priority", emb)
         increment_access(memory_db, [mid1, mid2])
         m1 = get_memory(memory_db, mid1)
         m2 = get_memory(memory_db, mid2)
@@ -218,7 +210,7 @@ class TestEntities:
 
     def test_link_memory_entity(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory", "priority", emb)
         eid = get_or_create_entity(memory_db, "docker", "tool")
         link_memory_entity(memory_db, mid, eid)
         entities = get_entities_for_memory(memory_db, mid)
@@ -227,7 +219,7 @@ class TestEntities:
 
     def test_get_memories_by_entity(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Uses Docker for deployment", 0.7, "decision_rationale", emb)
+        mid = insert_memory(memory_db, "Uses Docker for deployment", "decision_rationale", emb)
         eid = get_or_create_entity(memory_db, "docker", "tool")
         link_memory_entity(memory_db, mid, eid)
         mems = get_memories_by_entity(memory_db, "docker")
@@ -238,8 +230,8 @@ class TestEntities:
 class TestMemoryLinks:
     def test_insert_memory_link(self, memory_db):
         emb = _make_embedding()
-        mid1 = insert_memory(memory_db, "Memory 1", 0.5, "priority", emb)
-        mid2 = insert_memory(memory_db, "Memory 2", 0.6, "priority", emb)
+        mid1 = insert_memory(memory_db, "Memory 1", "priority", emb)
+        mid2 = insert_memory(memory_db, "Memory 2", "priority", emb)
         insert_memory_link(memory_db, mid1, mid2, "corroborates", "Same preference")
         linked = get_linked_memories(memory_db, mid1)
         assert len(linked) == 1
@@ -247,8 +239,8 @@ class TestMemoryLinks:
 
     def test_insert_memory_link_idempotent(self, memory_db):
         emb = _make_embedding()
-        mid1 = insert_memory(memory_db, "Memory 1", 0.5, "priority", emb)
-        mid2 = insert_memory(memory_db, "Memory 2", 0.6, "priority", emb)
+        mid1 = insert_memory(memory_db, "Memory 1", "priority", emb)
+        mid2 = insert_memory(memory_db, "Memory 2", "priority", emb)
         insert_memory_link(memory_db, mid1, mid2, "corroborates")
         insert_memory_link(memory_db, mid1, mid2, "corroborates")
         linked = get_linked_memories(memory_db, mid1)
@@ -273,13 +265,13 @@ class TestExtractionLog:
 class TestFTS5Sync:
     def test_fts_insert_syncs(self, memory_db):
         emb = _make_embedding()
-        insert_memory(memory_db, "Prefers threading over asyncio", 0.9, "rejected_alternative", emb)
+        insert_memory(memory_db, "Prefers threading over asyncio", "rejected_alternative", emb)
         results = memory_db.execute("SELECT rowid FROM memories_fts WHERE memories_fts MATCH 'threading'").fetchall()
         assert len(results) == 1
 
     def test_fts_update_syncs(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Original text about dogs", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Original text about dogs", "priority", emb)
         update_memory(memory_db, mid, text="Updated text about cats")
         results = memory_db.execute("SELECT rowid FROM memories_fts WHERE memories_fts MATCH 'cats'").fetchall()
         assert len(results) == 1
@@ -288,7 +280,7 @@ class TestFTS5Sync:
 
     def test_fts_delete_syncs(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Memory about pytest", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Memory about pytest", "priority", emb)
         delete_memory(memory_db, mid)
         results = memory_db.execute("SELECT rowid FROM memories_fts WHERE memories_fts MATCH 'pytest'").fetchall()
         assert len(results) == 0
@@ -313,16 +305,16 @@ class TestEmbeddingConversion:
 class TestGetExistingMemoryTexts:
     def test_get_existing_texts(self, memory_db):
         emb = _make_embedding()
-        insert_memory(memory_db, "Memory A", 0.5, "priority", emb)
-        insert_memory(memory_db, "Memory B", 0.5, "priority", emb)
+        insert_memory(memory_db, "Memory A", "priority", emb)
+        insert_memory(memory_db, "Memory B", "priority", emb)
         texts = get_existing_memory_texts(memory_db)
         assert "Memory A" in texts
         assert "Memory B" in texts
 
     def test_get_existing_excludes_archived(self, memory_db):
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Archived memory", 0.5, "priority", emb)
-        insert_memory(memory_db, "Active memory", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Archived memory", "priority", emb)
+        insert_memory(memory_db, "Active memory", "priority", emb)
         archive_memory(memory_db, mid)
         texts = get_existing_memory_texts(memory_db)
         assert "Archived memory" not in texts

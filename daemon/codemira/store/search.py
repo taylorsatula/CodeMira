@@ -10,7 +10,6 @@ class SearchResult:
     memory_id: str
     score: float
     text: str
-    importance: float
     category: str
 
 
@@ -29,7 +28,7 @@ class HybridSearcher:
         if not fts_query:
             return []
         cursor = conn.execute(
-            "SELECT m.id, bm25(memories_fts) as score, m.text, m.importance, m.category "
+            "SELECT m.id, bm25(memories_fts) as score, m.text, m.category "
             "FROM memories_fts fts JOIN memories m ON m.rowid = fts.rowid "
             "WHERE memories_fts MATCH ? AND m.is_archived = 0 "
             "ORDER BY score LIMIT ?",
@@ -41,7 +40,6 @@ class HybridSearcher:
                 memory_id=row["id"],
                 score=row["score"],
                 text=row["text"],
-                importance=row["importance"],
                 category=row["category"],
             ))
         return results
@@ -52,7 +50,7 @@ class HybridSearcher:
         results = []
         for memory_id, similarity in raw:
             row = conn.execute(
-                "SELECT text, importance, category FROM memories WHERE id = ? AND is_archived = 0",
+                "SELECT text, category FROM memories WHERE id = ? AND is_archived = 0",
                 (memory_id,),
             ).fetchone()
             if row is None:
@@ -61,7 +59,6 @@ class HybridSearcher:
                 memory_id=memory_id,
                 score=similarity,
                 text=row["text"],
-                importance=row["importance"],
                 category=row["category"],
             ))
         return results
@@ -88,7 +85,6 @@ class HybridSearcher:
                 memory_id=mid,
                 score=rrf_scores[mid],
                 text=r.text,
-                importance=r.importance,
                 category=r.category,
             ))
         return results

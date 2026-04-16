@@ -10,7 +10,7 @@ def memory_db_with_memories(memory_db):
     from codemira.store.db import insert_memory
     ids = []
     for i, emb in enumerate(embs):
-        mid = insert_memory(memory_db, f"Memory {i}", 0.5 + i * 0.1, "priority", emb)
+        mid = insert_memory(memory_db, f"Memory {i}", "priority", emb)
         ids.append(mid)
     return memory_db, ids, embs
 
@@ -41,8 +41,8 @@ class TestMemoryIndexBuild:
         from codemira.store.db import insert_memory, archive_memory
         from codemira.store.index import MemoryIndex
         emb = _make_embedding()
-        mid1 = insert_memory(memory_db, "Active", 0.5, "priority", emb)
-        mid2 = insert_memory(memory_db, "To archive", 0.5, "priority", emb)
+        mid1 = insert_memory(memory_db, "Active", "priority", emb)
+        mid2 = insert_memory(memory_db, "To archive", "priority", emb)
         archive_memory(memory_db, mid2)
         index_path = os.path.join(tmpdir_path, "memories.index")
         mi = MemoryIndex(os.path.join(tmpdir_path, "memories.db"), index_path)
@@ -110,12 +110,12 @@ class TestMemoryIndexRebuild:
         from codemira.store.db import insert_memory
         from codemira.store.index import MemoryIndex
         emb = _make_embedding()
-        mid = insert_memory(memory_db, "Test", 0.5, "priority", emb)
+        mid = insert_memory(memory_db, "Test", "priority", emb)
         index_path = os.path.join(tmpdir_path, "memories.index")
         mi = MemoryIndex(os.path.join(tmpdir_path, "memories.db"), index_path)
         mi.build_from_db(memory_db)
         assert len(mi.id_map) == 1
         emb2 = _make_embedding(seed=99)
-        insert_memory(memory_db, "Another", 0.5, "priority", emb2)
+        insert_memory(memory_db, "Another", "priority", emb2)
         mi.rebuild_after_write(memory_db)
         assert len(mi.id_map) == 2
