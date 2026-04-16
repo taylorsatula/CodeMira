@@ -3,12 +3,22 @@ import os
 import pytest
 
 from tests.conftest import skip_no_ollama
-from codemira.extraction.dedup import is_duplicate_text, extract_entities
+from codemira.extraction.dedup import is_duplicate_text, extract_entities, VALID_ENTITY_TYPES
+from codemira.extraction.extractor import _build_existing_memories_str
 
 
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
 OLLAMA_URL = "http://localhost:11434"
 ENTITY_MODEL = "gemma4:e2b"
+
+
+class TestValidEntityTypes:
+    def test_project_concept_in_valid_types(self):
+        assert "project_concept" in VALID_ENTITY_TYPES
+
+    def test_all_original_types_preserved(self):
+        expected = {"library", "framework", "tool", "pattern", "protocol", "error", "project_concept", "other"}
+        assert VALID_ENTITY_TYPES == expected
 
 
 class TestDedupText:
@@ -74,3 +84,58 @@ class TestExtractEntities:
         )
         names = [e["name"] for e in entities]
         assert len(names) == len(set(names)), f"Expected unique names, got {names}"
+
+    def test_extracts_project_concept(self):
+        entities = extract_entities(
+            "The PeanutGallery is a two-stage metacognitive observer that watches MIRA's conversations",
+            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+        )
+        names = {e["name"] for e in entities}
+        types = {e["type"] for e in entities}
+        assert "peanutgallery" in names, f"Expected peanutgallery in {names}"
+        assert "project_concept" in types, f"Expected project_concept type in {types}"
+
+    def test_project_concept_type_preserved(self):
+        entities = extract_entities(
+            "The DomainDocs subsystem generates project documentation",
+            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+        )
+        domaindocs = next((e for e in entities if e["name"] == "domaindocs"), None)
+        if domaindocs is not None:
+            assert domaindocs["type"] == "project_concept", f"Expected project_concept, got {domaindocs['type']}"
+
+
+class TestBuildExistingMemoriesStr:
+    def test_no_memories(self):
+        existing_str, combined = _build_existing_memories_str([], None)
+        assert existing_str == "None"
+        assert combined == []
+
+    def test_existing_only(self):
+        existing_str, combined = _build_existing_memories_str(["memory one", "memory two"], None)
+        assert existing_str == "- memory one\n- memory two"
+        assert combined == ["memory one", "memory two"]
+
+    def test_prior_chunks_only(self):
+        existing_str, combined = _build_existing_memories_str([], ["chunk memory a"])
+        assert "--- Previously extracted from this session ---" in existing_str
+        assert "- chunk memory a" in existing_str
+        assert combined == ["chunk memory a"]
+
+    def test_existing_and_prior_chunks(self):
+        existing_str, combined = _build_existing_memories_str(
+            ["db memory"], ["chunk memory a", "chunk memory b"]
+        )
+        assert "- db memory" in existing_str
+        assert "--- Previously extracted from this session ---" in existing_str
+        assert "- chunk memory a" in existing_str
+        assert "- chunk memory b" in existing_str
+        assert combined == ["db memory", "chunk memory a", "chunk memory b"]
+
+    def test_db_memories_before_prior_chunks(self):
+        existing_str, combined = _build_existing_memories_str(
+            ["db memory"], ["chunk memory"]
+        )
+        db_idx = existing_str.index("- db memory")
+        prior_idx = existing_str.index("--- Previously extracted from this session ---")
+        assert db_idx < prior_idx

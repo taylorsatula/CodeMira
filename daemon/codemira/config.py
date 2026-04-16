@@ -12,6 +12,7 @@ class DaemonConfig(BaseSettings):
     embedding_dimension: int = 768
     subcortical_model: str = "gemma4:e2b"
     extraction_model: str = "z-ai/glm-5.1"
+    extraction_model_context_length: int = 128000
     consolidation_interval_hours: int = 24
     consolidation_model: str = "gemma4:e4b"
     consolidation_similarity_threshold: float = 0.85

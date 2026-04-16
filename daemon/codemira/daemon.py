@@ -11,6 +11,7 @@ from codemira.store.manager import StoreManager
 from codemira.server import create_server
 from codemira.extraction.compressor import call_ollama
 from codemira.extraction.extractor import extract_memories
+from codemira.extraction.chunker import chunk_compressed_transcript, estimate_token_count
 from codemira.extraction.dedup import is_duplicate_vector, extract_entities
 from codemira.extraction.link_classifier import classify_link
 
@@ -60,10 +61,25 @@ def process_idle_session(
             return
         try:
             compressed = compress_tool_calls(conversation, config.subcortical_model, config.ollama_url, prompts_dir)
-            memories = extract_memories(
-                compressed, memory_conn, config.extraction_model, api_key,
-                config.deduplicate_text_threshold, prompts_dir,
+            from codemira.store.db import get_existing_memory_texts
+            existing_memories_token_estimate = estimate_token_count(
+                "\n".join(get_existing_memory_texts(memory_conn))
             )
+            chunks = chunk_compressed_transcript(
+                compressed, config.extraction_model_context_length,
+                existing_memories_token_estimate,
+            )
+            all_memories: list[dict] = []
+            prior_texts: list[str] = []
+            for chunk in chunks:
+                chunk_memories = extract_memories(
+                    chunk, memory_conn, config.extraction_model, api_key,
+                    config.deduplicate_text_threshold, prompts_dir,
+                    prior_chunk_texts=prior_texts if prior_texts else None,
+                )
+                all_memories.extend(chunk_memories)
+                prior_texts = [m["text"] for m in all_memories]
+            memories = all_memories
         except ExtractionError as e:
             log_extraction(memory_conn, session_id, 0)
             log.warning("Marking session %s as extracted after non-retryable error: %s", session_id, e)

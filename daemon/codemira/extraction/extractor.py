@@ -39,6 +39,20 @@ def load_prompt(name: str, prompts_dir: str | None = None) -> str:
         return f.read()
 
 
+def _build_existing_memories_str(existing_texts: list[str], prior_chunk_texts: list[str] | None) -> tuple[str, list[str]]:
+    combined_texts = list(existing_texts)
+    if prior_chunk_texts:
+        combined_texts.extend(prior_chunk_texts)
+    lines = []
+    if existing_texts:
+        lines.extend(f"- {t}" for t in existing_texts)
+    if prior_chunk_texts:
+        lines.append("--- Previously extracted from this session ---")
+        lines.extend(f"- {t}" for t in prior_chunk_texts)
+    existing_str = "\n".join(lines) if lines else "None"
+    return existing_str, combined_texts
+
+
 def extract_memories(
     compressed_transcript: str,
     conn,
@@ -46,10 +60,11 @@ def extract_memories(
     api_key: str,
     deduplicate_text_threshold: float = 0.95,
     prompts_dir: str | None = None,
+    prior_chunk_texts: list[str] | None = None,
 ) -> list[dict]:
     system_prompt = load_prompt("extraction_system", prompts_dir)
     existing_texts = get_existing_memory_texts(conn)
-    existing_str = "\n".join(f"- {t}" for t in existing_texts) if existing_texts else "None"
+    existing_str, combined_texts = _build_existing_memories_str(existing_texts, prior_chunk_texts)
     user_prompt = load_prompt("extraction_user", prompts_dir)
     user_prompt = user_prompt.replace("{compressed_transcript}", compressed_transcript)
     user_prompt = user_prompt.replace("{existing_memories}", existing_str)
@@ -72,7 +87,7 @@ def extract_memories(
     for m in memories:
         if not isinstance(m, dict) or "text" not in m:
             continue
-        if is_duplicate_text(m["text"], existing_texts, deduplicate_text_threshold):
+        if is_duplicate_text(m["text"], combined_texts, deduplicate_text_threshold):
             continue
         deduped.append(m)
     return deduped
