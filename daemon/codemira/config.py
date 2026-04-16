@@ -25,5 +25,7 @@ class DaemonConfig(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     max_extraction_attempts: int = 3
     opencode_db_path: str | None = None
+    arc_summary_model: str = "gemma4:e4b"
+    arc_summary_model_context_length: int = 128000
 
     model_config = SettingsConfigDict(env_prefix="CODEMIRA_")

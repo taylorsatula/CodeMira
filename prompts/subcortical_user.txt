@@ -1,8 +1,12 @@
+<conversation_arc>
+{conversation_arc}
+</conversation_arc>
+
 <developer_goal>{user_message}</developer_goal>
-═════════════════════════════════════════════
+═══════════════════════════════════════════════
 <system_message>Execute the three-step IR process on this action:</system_message>
 ┃◆┃ BEGIN RECENT ACTIONS ┃◆┃
 {recent_actions}
 ┃◆┃ END RECENT ACTIONS ┃◆┃
-═════════════════════════════════════════════
+═══════════════════════════════════════════════
 <pinned_memories>{pinned_memories}</pinned_memories>

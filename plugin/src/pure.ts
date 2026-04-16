@@ -5,42 +5,47 @@ export interface Memory {
   category: string
 }
 
-export function extractToolTrace(
+export function extractCurrentTurnContext(
   messages: { info: any; parts: any[] }[],
-  window: number,
-): string[] {
-  const actions: string[] = []
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.info.role !== "assistant") continue
-    for (const part of msg.parts) {
-      if (actions.length >= window) break
-      if (part.type === "tool" && part.state?.status === "completed") {
-        const tool = part.tool || "unknown"
-        const input = part.state.input || {}
-        const title = part.state.title || ""
-        const target = input.path || input.command || input.pattern || ""
-        const result = title || (part.state.output || "").slice(0, 80)
-        actions.push(`<action tool="${tool}" target="${target}" result="${result}" />`)
-      }
-    }
-    if (actions.length >= window) break
-  }
-  return actions
-}
+  toolWindow: number,
+): { userMessage: string; toolTrace: string[] } {
+  let userMessage = ""
+  const toolTrace: string[] = []
 
-export function extractUserGoal(messages: { info: any; parts: any[] }[]): string {
+  // Traverse backwards to capture the immediate current turn
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg.info.role === "user") {
-      for (const part of msg.parts) {
-        if (part.type === "text" && !part.synthetic) {
-          return part.text.slice(0, 200)
+    
+    if (msg.info.role === "assistant") {
+      for (const part of [...msg.parts].reverse()) { // Reverse to get most recent tools first
+        if (toolTrace.length >= toolWindow) break
+        if (part.type === "tool" && part.state?.status === "completed") {
+          const tool = part.tool || "unknown"
+          const input = part.state.input || {}
+          const title = part.state.title || ""
+          const target = input.path || input.command || input.pattern || ""
+          const result = title || (part.state.output || "").slice(0, 80)
+          // Prepend so they appear in chronological order in the array
+          toolTrace.unshift(`<action tool="${tool}" target="${target}" result="${result}" />`)
         }
       }
+    } else if (msg.info.role === "user") {
+      // Stop at the first real user message we hit (the start of the current turn)
+      let foundRealUserMessage = false
+      for (const part of msg.parts) {
+        if (part.type === "text" && !part.synthetic) {
+          userMessage = part.text.slice(0, 500) // Give it a bit more breathing room
+          foundRealUserMessage = true
+          break
+        }
+      }
+      if (foundRealUserMessage) {
+        break // We found the start of the current turn, stop traversing
+      }
     }
   }
-  return ""
+
+  return { userMessage, toolTrace }
 }
 
 export function formatPinnedMemories(memories: Memory[], truncWords: number): string {
@@ -94,4 +99,32 @@ export function formatHud(memories: Memory[], truncWords: number): string {
     })
     .join("\n")
   return `<developer_context>\n${lines}\n</developer_context>`
+}
+
+export function triggerArcGeneration(
+  daemonUrl: string,
+  sessionId: string,
+  projectDir: string,
+): void {
+  fetch(`${daemonUrl}/arc/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, project_dir: projectDir }),
+  }).catch(() => {})
+}
+
+export async function fetchArcSummary(
+  daemonUrl: string,
+  sessionId: string,
+  projectDir: string,
+): Promise<string | null> {
+  try {
+    const url = `${daemonUrl}/arc?session_id=${encodeURIComponent(sessionId)}&project_dir=${encodeURIComponent(projectDir)}`
+    const response = await fetch(url, { signal: AbortSignal.timeout(2000) })
+    if (!response.ok) return null
+    const data = (await response.json()) as { topology: string | null }
+    return data.topology
+  } catch {
+    return null
+  }
 }

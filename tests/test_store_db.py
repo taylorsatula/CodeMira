@@ -28,6 +28,8 @@ from codemira.store.db import (
     embedding_to_blob,
     blob_to_embedding,
     generate_memory_id,
+    upsert_arc_summary,
+    get_arc_summary,
 )
 
 
@@ -325,3 +327,24 @@ class TestGetExistingMemoryTexts:
         texts = get_existing_memory_texts(memory_db)
         assert "Archived memory" not in texts
         assert "Active memory" in texts
+
+
+class TestArcSummaries:
+    def test_upsert_and_get(self, memory_db):
+        upsert_arc_summary(memory_db, "ses_abc", "[START] Goal: Fix bug\n └─ [CURRENT] Editing file", 10)
+        arc = get_arc_summary(memory_db, "ses_abc")
+        assert arc is not None
+        assert arc["session_id"] == "ses_abc"
+        assert arc["topology"] == "[START] Goal: Fix bug\n └─ [CURRENT] Editing file"
+        assert arc["message_count"] == 10
+        assert arc["generated_at"] is not None
+
+    def test_get_nonexistent(self, memory_db):
+        assert get_arc_summary(memory_db, "ses_nonexistent") is None
+
+    def test_upsert_overwrites(self, memory_db):
+        upsert_arc_summary(memory_db, "ses_abc", "[START] Old topology", 5)
+        upsert_arc_summary(memory_db, "ses_abc", "[START] New topology", 12)
+        arc = get_arc_summary(memory_db, "ses_abc")
+        assert arc["topology"] == "[START] New topology"
+        assert arc["message_count"] == 12

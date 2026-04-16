@@ -4,8 +4,8 @@
 
 CodeMira is a developer memory system for OpenCode coding sessions. Two processes cooperate through a single per-project store:
 
-- **Python daemon** (`daemon/codemira/`): persistent process launched by launchd. Polls OpenCode's SQLite for idle sessions, compresses tool I/O via Ollama, extracts memories via OpenRouter (GLM-5.1), embeds via `MongoDB/mdbr-leaf-ir-asym`, classifies links via Ollama, consolidates clusters. Serves `/health` and `/retrieve` on `127.0.0.1:9473`. `ExtractionError` (`daemon/codemira/errors.py`) separates non-retryable logic failures from infrastructure outages.
-- **TypeScript plugin** (`plugin/src/`): loaded by OpenCode. Hooks `experimental.chat.messages.transform`. Extracts recent tool trace + user goal, calls an Ollama subcortical model for intent analysis, calls the daemon `/retrieve`, injects a `<developer_context>` HUD into the messages array before the LLM call.
+- **Python daemon** (`daemon/codemira/`): persistent process launched by launchd. Polls OpenCode's SQLite for idle sessions, compresses tool I/O via Ollama, extracts memories via OpenRouter (GLM-5.1), embeds via `MongoDB/mdbr-leaf-ir-asym`, classifies links via Ollama, consolidates clusters. Serves `/health`, `/retrieve`, `POST /arc/generate`, and `GET /arc` on `127.0.0.1:9473`. `ExtractionError` (`daemon/codemira/errors.py`) separates non-retryable logic failures from infrastructure outages.
+- **TypeScript plugin** (`plugin/src/`): loaded by OpenCode. Hooks `experimental.chat.messages.transform`. Extracts recent tool trace + user goal, calls an Ollama subcortical model for intent analysis, calls the daemon `/retrieve`, triggers arc generation fire-and-forget via `POST /arc/generate`, fetches pre-computed arc via `GET /arc`, injects a `<developer_context>` HUD (with conversation arc) into the messages array before the LLM call.
 
 Memory stores are per-project at `<project-worktree>/.codememory/memories.db` (+ `memories.index` hnswlib cache). No global store — widely applicable preferences re-extract per project (reinforcement, not duplication).
 
@@ -83,8 +83,8 @@ Don't parameterize what won't vary. Constants with comments explaining why ("hns
 
 ### Process Topology
 - **Daemon loop** (`daemon/codemira/daemon.py:run_daemon`): polls at `poll_interval_minutes` (default 15). Each cycle: discover OpenCode DB → read project worktrees → find idle sessions → process each (compress → extract → embed → store → link). Consolidation runs at `consolidation_interval_hours` (default 24) across all known project stores.
-- **HTTP bridge** (`daemon/codemira/server.py`): `HTTPServer` on `127.0.0.1:{http_port}` (default 9473). Single-threaded `BaseHTTPRequestHandler`. `POST /retrieve` accepts subcortical output and returns ranked memories; `GET /health` reports Ollama and embedding-model status.
-- **Plugin hook** (`plugin/src/index.ts`): closure over pinned-memory state. Fires on every `experimental.chat.messages.transform`. Pure transforms live in `plugin/src/pure.ts` so they can be unit-tested under Bun without a running OpenCode.
+- **HTTP bridge** (`daemon/codemira/server.py`): `HTTPServer` on `127.0.0.1:{http_port}` (default 9473). Single-threaded `BaseHTTPRequestHandler`. `POST /retrieve` accepts subcortical output and returns ranked memories; `POST /arc/generate` triggers background arc generation (returns 202 immediately); `GET /arc` returns pre-computed decision topology for a session; `GET /health` reports Ollama and embedding-model status.
+- **Plugin hook** (`plugin/src/index.ts`): closure over pinned-memory state. Fires on every `experimental.chat.messages.transform`. Detects new user messages to trigger arc generation fire-and-forget. Fetches pre-computed arc on each hook call. Pure transforms live in `plugin/src/pure.ts` so they can be unit-tested under Bun without a running OpenCode.
 
 ### Project Root Resolution
 The daemon keys per-project stores by `project.worktree` from OpenCode's SQLite. **The plugin must pass `PluginInput.worktree` to `/retrieve` — not `PluginInput.directory`.** `directory` is the session cwd and may be a subdirectory of the project root; using it points retrieval at a store the daemon never writes to. Any code path that touches project scoping must use `worktree`.
@@ -97,6 +97,17 @@ The daemon keys per-project stores by `project.worktree` from OpenCode's SQLite.
 
 ### Storage Model
 `memories.db` (SQLite WAL) is the source of truth. `memories.index` (hnswlib) is a rebuildable cache — never authoritative. Every write path calls `MemoryIndex.rebuild_after_write(conn)`. FTS5 stays in sync via three triggers (insert/update/delete) because `content='memories'` doesn't auto-sync.
+
+### Arc Summarizer (Decision Topology)
+The arc summarizer generates a structural decision topology of the conversation on demand. It is NOT part of the periodic extraction pipeline — it runs in the background when triggered by the plugin.
+
+- **On-demand generation**: The plugin fires `POST /arc/generate` (fire-and-forget, no await) when it detects a new user message. The daemon spawns a background thread that reads the full conversation from OpenCode's SQLite, formats it into a lightweight flat transcript (no Ollama compression pass), chunks it if it exceeds the model context window, and runs `call_ollama()` per chunk with frozen-prefix incremental chunking. The result is stored in the `arc_summaries` table in the project's `memories.db`.
+- **Arc retrieval**: The plugin fetches `GET /arc?session_id=...&project_dir=...` on each hook call. If no arc exists yet, `{topology: null}` is returned and the plugin omits the `<conversation_arc>` block.
+- **Dedicated table**: `arc_summaries` (session_id PK, topology, message_count, generated_at) stores transient session state. Arcs are not embedded, not indexed, and do not participate in retrieval, hub discovery, or consolidation.
+- **No double-compression**: The arc summarizer formats the raw conversation directly (tool name + title/output[:500]) instead of running `compress_tool_calls()`. The arc model produces its own structural abstraction — pre-compressing adds Ollama round-trips with no benefit.
+- **Incremental chunking with frozen prefixes**: Chunks split at `User:` turn boundaries. Once a chunk's arc is generated, it is frozen and prepended verbatim to the next chunk as context. Old chunks are never re-processed. The final arc is the concatenation of all chunk arc fragments.
+- **Model**: Defaults to `gemma4:e4b` (configurable via `arc_summary_model`). Config: `arc_summary_model_context_length` (default 128000).
+- **Handler**: `daemon/codemira/summarization/handler.py:generate_arc_summary()` is the entry point.
 
 ## 🧭 Codebase Patterns
 

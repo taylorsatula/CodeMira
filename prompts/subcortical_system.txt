@@ -1,24 +1,27 @@
-<directive>Output XML only. Start with <analysis>. No preamble.</directive>
-
-Extract technical concepts for Knowledge Graph lookup. Include libraries, frameworks, tools, design patterns, testing frameworks, and named architectural concepts the developer references or the agent is working with. Exclude generic terms (function, variable, class, method, return, import, module, file, string, integer, boolean). Most actions have 0-2 concepts. If none, output <entities>None</entities> exactly.
+<directive>Start immediately with <analysis>. Output XML only.</directive>
 
 ║⊕║ BEGIN ENTITY RULES ║⊕║
-Rule: Extract named technical concepts — things that have a proper name or identity in the software ecosystem.
-EXTRACT: Libraries (sqlalchemy, pytest, react), frameworks (fastapi, nextjs, express), tools (docker, webpack, git), patterns (factory, middleware, pub/sub, event-driven), protocols (oauth, grpc, websocket), specific errors (ConnectionRefusedError, ValidationError).
-DO NOT EXTRACT: Generic terms (function, variable, class, method, callback, handler, config, model, service, helper, util).
-Extract only concepts relevant to the current action. Most actions have 0-2. If none, output <entities>None</entities> exactly.
+Extract named concepts for Knowledge Graph lookup. Output 0-2 concepts. If none, output <entities>None</entities> exactly.
+1. HIGHEST PRIORITY: Project-specific vernacular and proper nouns. Output the exact name of project-internal modules, subsystems, components, or proper nouns the agent is working on or discussing (e.g., DomainDocs, PeanutGallery, auth module, subcortical, Taylor). These are things a new team member would need explained.
+2. LOWER PRIORITY: Ecosystem names. Output specific libraries (sqlalchemy, react) or tools (docker) ONLY if the current action is explicitly configuring or debugging them.
+DO NOT output generic structural words: function, variable, class, file, method.
 ║⊕║ END ENTITY RULES ║⊕║
 
-Filter pinned memories: drop memories no longer relevant to what the agent is currently doing. Keep memories that directly affect the current action or file.
-
 ║⊗║ BEGIN PASSAGE RULES ║⊗║
-Rule: Drop memories about a different task, file, or concern than what the agent is currently working on. Keep memories about the same file, same library, same pattern, or a decision that directly affects the current action. When uncertain, drop — stale context in a tool loop accumulates fast and obscures relevant signal. Copy exact passage ID (mem_ prefix).
+Filter the list of pinned <mem_id> passages. 
+Mechanical check: Does the passage share vocabulary, component names, or context with the <developer_goal> or recent <actions>?
+If YES: Keep the passage.
+If NO: Drop the passage.
+If UNCERTAIN: Keep the passage. Pre-filter false negatives cause permanent information loss.
+Copy the exact passage ID (mem_ prefix).
 ║⊗║ END PASSAGE RULES ║⊗║
 
-Generate retrieval phrases to match stored developer memories. (Memory examples: "Prefers threading over asyncio for concurrent I/O" "Uses direct file append instead of logging module for simple cases" "Tried Timer for retries, caused race conditions — use Event.wait instead").
-
 ║⊙║ BEGIN EXPANSION RULES ║⊙║
-Create 2-4 concrete, semicolon-separated phrases. Never use abstract meta-descriptions (like "code modification" or "file editing"). First phrase MUST describe the current action with specific library, file, or pattern names. Remaining phrases expand with related developer-style terms: how this developer approaches this kind of work, what alternatives they reject, what conventions they follow.
+Create 2-4 semicolon-separated retrieval phrases to match against the vector database.
+The vector database contains experiential micro-narratives about hidden constraints, failure philosophies, and discarded alternatives.
+1. First phrase: The exact file, library, or component name the agent is acting on.
+2. Second phrase: The specific failure mode, edge case, or constraint the agent is trying to navigate.
+3. Third phrase: Architectural rules or constraints drawn from the <conversation_arc> that affect the current goal.
 ║⊙║ END EXPANSION RULES ║⊙║
 
 <examples>
@@ -26,9 +29,19 @@ Create 2-4 concrete, semicolon-separated phrases. Never use abstract meta-descri
 <actions>read_file(db/connection.py) → grep(refresh_token, src/auth/) → edit_file(src/auth/oauth.py, L45-50)</actions>
 <goal>Add refresh token rotation to the auth module</goal>
 <output><analysis>
-<entities>OAuth, refresh_token</entities>
+<entities>auth module, OAuth</entities>
 <keep>mem_a1B2c3D4</keep>
-<query_expansion>implementing OAuth refresh token rotation; token expiry and renewal patterns; auth module error handling style</query_expansion>
+<query_expansion>auth module oauth implementation; refresh token rotation edge cases; token renewal failure philosophies</query_expansion>
+</analysis></output>
+</example>
+
+<example>
+<actions>read_file(daemon/codemira/extraction/compressor.py) → edit_file(daemon/codemira/extraction/dedup.py, L11)</actions>
+<goal>Add project_concept entity type for peanutgallery and domaindocs</goal>
+<output><analysis>
+<entities>peanutgallery, domaindocs, dedup</entities>
+<keep>mem_x1y2z3a4</keep>
+<query_expansion>adding project_concept entity taxonomy; peanutgallery and domaindocs internal vernacular; project specific concept extraction constraints</query_expansion>
 </analysis></output>
 </example>
 
@@ -36,9 +49,9 @@ Create 2-4 concrete, semicolon-separated phrases. Never use abstract meta-descri
 <actions>run_command(pytest tests/test_runner.py) → 1 failed: test_retry_on_high_load → read_file(src/prio/runner.py, L31-38)</actions>
 <goal>Fix the flaky retry test</goal>
 <output><analysis>
-<entities>pytest, threading</entities>
+<entities>pytest</entities>
 <keep>mem_c9d0e1f2, mem_k7l8m9n0</keep>
-<query_expansion>fixing flaky pytest test with race condition; threading Event.wait vs Timer for test synchronization; retry logic testing patterns</query_expansion>
+<query_expansion>src/prio/runner.py testing conventions; flaky retry test race conditions; test synchronization hidden constraints</query_expansion>
 </analysis></output>
 </example>
 
@@ -48,15 +61,15 @@ Create 2-4 concrete, semicolon-separated phrases. Never use abstract meta-descri
 <output><analysis>
 <entities>None</entities>
 <keep>mem_g3h4i5j6</keep>
-<query_expansion>writing failure log with direct file append; simple file I/O over logging framework; error output and failure recording patterns</query_expansion>
+<query_expansion>src/prio/runner.py logging conventions; writing failure log directly to file; simple file I/O rejected alternatives</query_expansion>
 </analysis></output>
 </example>
 </examples>
 
-<output_format><![CDATA[
+<output_format>
 <analysis>
 <entities>React, FastAPI</entities>
 <keep>mem_a1B2c3D4, mem_e5F6g7H8</keep>
-<query_expansion>building React form with FastAPI backend; form validation patterns; API error handling conventions</query_expansion>
+<query_expansion>React form FastAPI backend integration; form validation hidden constraints; API error handling philosophy</query_expansion>
 </analysis>
-]]></output_format>
+</output_format>

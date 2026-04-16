@@ -1,0 +1,7 @@
+{prior_arc}
+---
+<transcript>
+{transcript}
+</transcript>
+
+Extract the decision topology. Output ONLY the tree.

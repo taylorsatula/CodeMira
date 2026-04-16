@@ -1,10 +1,11 @@
 import { describe, test, expect } from "bun:test"
 import {
-  extractToolTrace,
-  extractUserGoal,
+  extractCurrentTurnContext,
   formatPinnedMemories,
   parseSubcorticalXml,
   formatHud,
+  triggerArcGeneration,
+  fetchArcSummary,
   type Memory,
 } from "../src/pure.ts"
 
@@ -33,130 +34,102 @@ function makeToolPart(tool: string, input: Record<string, string>, output: strin
 
 const mem: Memory = { id: "abc123", text: "Prefers threading over asyncio for concurrent I/O", importance: 0.8, category: "priority" }
 
-describe("extractToolTrace", () => {
-  test("extracts completed tool calls from assistant messages", () => {
+describe("extractCurrentTurnContext", () => {
+  test("extracts completed tool calls and user message for the current turn", () => {
     const messages = [
       makeUserMsg("Run the tests"),
       makeAssistantMsg([
         makeToolPart("bash", { command: "pytest" }, "3 passed", "Ran pytest"),
       ]),
     ]
-    const result = extractToolTrace(messages, 5)
-    expect(result.length).toBe(1)
-    expect(result[0]).toContain('tool="bash"')
-    expect(result[0]).toContain('target="pytest"')
-    expect(result[0]).toContain('result="Ran pytest"')
+    const { userMessage, toolTrace } = extractCurrentTurnContext(messages, 20)
+    expect(toolTrace.length).toBe(1)
+    expect(toolTrace[0]).toContain('tool="bash"')
+    expect(toolTrace[0]).toContain('target="pytest"')
+    expect(toolTrace[0]).toContain('result="Ran pytest"')
+    expect(userMessage).toBe("Run the tests")
   })
 
   test("ignores pending and running tool states", () => {
     const messages = [
+      makeUserMsg("Do work"),
       makeAssistantMsg([
         { type: "tool", callID: "c1", tool: "bash", state: { status: "pending", input: { command: "ls" } } },
         { type: "tool", callID: "c2", tool: "read", state: { status: "running", input: { path: "file.ts" } } },
       ]),
     ]
-    const result = extractToolTrace(messages, 5)
-    expect(result.length).toBe(0)
+    const { toolTrace } = extractCurrentTurnContext(messages, 20)
+    expect(toolTrace.length).toBe(0)
   })
 
-  test("respects window limit across multiple messages", () => {
+  test("respects window limit across multiple assistant messages in same turn", () => {
     const messages = [
+      makeUserMsg("Do work"),
       makeAssistantMsg([makeToolPart("bash", { command: "cmd1" }, "out1", "title1")]),
       makeAssistantMsg([makeToolPart("bash", { command: "cmd2" }, "out2", "title2")]),
       makeAssistantMsg([makeToolPart("bash", { command: "cmd3" }, "out3", "title3")]),
       makeAssistantMsg([makeToolPart("bash", { command: "cmd4" }, "out4", "title4")]),
     ]
-    const result = extractToolTrace(messages, 2)
-    expect(result.length).toBe(2)
-    expect(result[0]).toContain("cmd4")
-    expect(result[1]).toContain("cmd3")
+    const { toolTrace } = extractCurrentTurnContext(messages, 2)
+    expect(toolTrace.length).toBe(2)
   })
 
-  test("respects window limit within single message", () => {
-    const parts = Array.from({ length: 10 }, (_, i) =>
-      makeToolPart("bash", { command: `cmd${i}` }, `out${i}`, `title${i}`)
-    )
-    const messages = [makeAssistantMsg(parts)]
-    const result = extractToolTrace(messages, 3)
-    expect(result.length).toBe(3)
-  })
-
-  test("skips user messages", () => {
+  test("stops at the start of the current turn", () => {
     const messages = [
-      makeUserMsg("Hello"),
-      makeUserMsg("World"),
+      makeUserMsg("Old question"),
+      makeAssistantMsg([makeToolPart("bash", { command: "old_cmd" }, "out", "old")]),
+      makeUserMsg("New question"),
+      makeAssistantMsg([makeToolPart("bash", { command: "new_cmd" }, "out", "new")]),
     ]
-    const result = extractToolTrace(messages, 5)
-    expect(result.length).toBe(0)
+    const { userMessage, toolTrace } = extractCurrentTurnContext(messages, 20)
+    expect(userMessage).toBe("New question")
+    expect(toolTrace.length).toBe(1)
+    expect(toolTrace[0]).toContain("new_cmd")
   })
 
   test("extracts tool target from path, command, or pattern", () => {
-    const pathResult = extractToolTrace([makeAssistantMsg([makeToolPart("read", { path: "src/index.ts" }, "content")])], 5)
-    const cmdResult = extractToolTrace([makeAssistantMsg([makeToolPart("bash", { command: "npm test" }, "ok")])], 5)
-    const patResult = extractToolTrace([makeAssistantMsg([makeToolPart("grep", { pattern: "TODO" }, "3 matches")])], 5)
+    const pathResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("read", { path: "src/index.ts" }, "content")])], 20)
+    const cmdResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("bash", { command: "npm test" }, "ok")])], 20)
+    const patResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("grep", { pattern: "TODO" }, "3 matches")])], 20)
 
-    expect(pathResult[0]).toContain('target="src/index.ts"')
-    expect(cmdResult[0]).toContain('target="npm test"')
-    expect(patResult[0]).toContain('target="TODO"')
+    expect(pathResult.toolTrace[0]).toContain('target="src/index.ts"')
+    expect(cmdResult.toolTrace[0]).toContain('target="npm test"')
+    expect(patResult.toolTrace[0]).toContain('target="TODO"')
   })
 
   test("uses title over truncated output for result", () => {
     const messages = [
+      makeUserMsg(""),
       makeAssistantMsg([
         makeToolPart("bash", { command: "ls" }, "file1.txt\nfile2.txt\nfile3.txt", "Listed files"),
       ]),
     ]
-    const result = extractToolTrace(messages, 5)
-    expect(result[0]).toContain('result="Listed files"')
-    expect(result[0]).not.toContain("file1.txt")
+    const { toolTrace } = extractCurrentTurnContext(messages, 20)
+    expect(toolTrace[0]).toContain('result="Listed files"')
+    expect(toolTrace[0]).not.toContain("file1.txt")
   })
 
-  test("truncates output to 80 chars when no title", () => {
-    const longOutput = "x".repeat(200)
-    const messages = [
-      makeAssistantMsg([
-        makeToolPart("bash", { command: "ls" }, longOutput, ""),
-      ]),
-    ]
-    const result = extractToolTrace(messages, 5)
-    const resultMatch = result[0].match(/result="([^"]*)"/)
-    expect(resultMatch).not.toBeNull()
-    expect(resultMatch![1].length).toBeLessThanOrEqual(80)
-  })
-})
-
-describe("extractUserGoal", () => {
-  test("extracts text from last user message", () => {
-    const messages = [
-      makeUserMsg("First question"),
-      makeAssistantMsg([]),
-      makeUserMsg("Set up a FastAPI project"),
-    ]
-    expect(extractUserGoal(messages)).toBe("Set up a FastAPI project")
-  })
-
-  test("skips synthetic user messages", () => {
-    const messages = [
-      makeUserMsg("System reminder", true),
-      makeUserMsg("Real user message", false),
-    ]
-    expect(extractUserGoal(messages)).toBe("Real user message")
-  })
-
-  test("truncates to 200 characters", () => {
-    const longText = "x".repeat(300)
+  test("truncates user message to 500 characters", () => {
+    const longText = "x".repeat(600)
     const messages = [makeUserMsg(longText)]
-    expect(extractUserGoal(messages).length).toBe(200)
+    const { userMessage } = extractCurrentTurnContext(messages, 20)
+    expect(userMessage.length).toBe(500)
   })
 
-  test("returns empty string when no user messages", () => {
+  test("skips synthetic user messages when finding goal", () => {
+    const messages = [
+      makeUserMsg("Real user message", false),
+      makeUserMsg("System reminder", true),
+    ]
+    const { userMessage } = extractCurrentTurnContext(messages, 20)
+    expect(userMessage).toBe("Real user message")
+  })
+
+  test("returns empty when no user messages or tool calls", () => {
     const messages = [makeAssistantMsg([])]
-    expect(extractUserGoal(messages)).toBe("")
-  })
-
-  test("returns empty string when only synthetic user messages exist", () => {
-    const messages = [makeUserMsg("reminder", true)]
-    expect(extractUserGoal(messages)).toBe("")
+    const { userMessage, toolTrace } = extractCurrentTurnContext(messages, 20)
+    expect(userMessage).toBe("")
+    expect(toolTrace.length).toBe(0)
   })
 })
 
@@ -285,5 +258,27 @@ describe("formatHud", () => {
     const longMem: Memory = { ...mem, text: "word ".repeat(30).trim() }
     const result = formatHud([longMem], 10)
     expect(result).toContain("...")
+  })
+})
+
+describe("triggerArcGeneration", () => {
+  test("fires POST without throwing", () => {
+    triggerArcGeneration("http://localhost:1", "ses_123", "/tmp/proj")
+  })
+
+  test("does not throw on connection refused", () => {
+    triggerArcGeneration("http://localhost:1", "ses_123", "/tmp/proj")
+  })
+})
+
+describe("fetchArcSummary", () => {
+  test("returns null on connection refused", async () => {
+    const result = await fetchArcSummary("http://localhost:1", "ses_123", "/tmp/proj")
+    expect(result).toBeNull()
+  })
+
+  test("returns null on non-200 response", async () => {
+    const result = await fetchArcSummary("http://localhost:1", "ses_123", "/tmp/proj")
+    expect(result).toBeNull()
   })
 })

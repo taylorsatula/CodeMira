@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import urllib.request
+import urllib.parse
 import os
 import numpy as np
 from tests.conftest import _make_embedding, _make_embeddings
@@ -122,3 +123,55 @@ class TestNotFoundEndpoint:
             assert False
         except urllib.error.HTTPError as e:
             assert e.code == 404
+
+
+class TestArcGetEndpoint:
+    def test_arc_returns_null_when_no_arc(self, server_setup):
+        base_url, conn, mi, ids, embs, config, project_dir = server_setup
+        resp = urllib.request.urlopen(f"{base_url}/arc?session_id=ses_none&project_dir={urllib.parse.quote(project_dir)}")
+        data = json.loads(resp.read())
+        assert data["topology"] is None
+        assert data["session_id"] == "ses_none"
+
+    def test_arc_returns_stored_topology(self, server_setup):
+        base_url, conn, mi, ids, embs, config, project_dir = server_setup
+        from codemira.store.db import upsert_arc_summary
+        upsert_arc_summary(conn, "ses_test", "[START] Goal: Fix bug\n └─ [CURRENT] Done", 10)
+        resp = urllib.request.urlopen(f"{base_url}/arc?session_id=ses_test&project_dir={urllib.parse.quote(project_dir)}")
+        data = json.loads(resp.read())
+        assert data["topology"] == "[START] Goal: Fix bug\n └─ [CURRENT] Done"
+        assert data["session_id"] == "ses_test"
+
+    def test_arc_missing_params_returns_400(self, server_setup):
+        base_url = server_setup[0]
+        try:
+            urllib.request.urlopen(f"{base_url}/arc?session_id=ses_x")
+            assert False
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+
+
+class TestArcGenerateEndpoint:
+    def test_arc_generate_returns_202(self, server_setup):
+        base_url, conn, mi, ids, embs, config, project_dir = server_setup
+        payload = json.dumps({
+            "session_id": "ses_gen",
+            "project_dir": project_dir,
+        }).encode()
+        req = urllib.request.Request(f"{base_url}/arc/generate", data=payload,
+                                      headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req)
+        assert resp.code == 202
+        data = json.loads(resp.read())
+        assert data["status"] == "generating"
+
+    def test_arc_generate_missing_params_returns_400(self, server_setup):
+        base_url = server_setup[0]
+        payload = json.dumps({"session_id": "ses_x"}).encode()
+        req = urllib.request.Request(f"{base_url}/arc/generate", data=payload,
+                                      headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req)
+            assert False
+        except urllib.error.HTTPError as e:
+            assert e.code == 400

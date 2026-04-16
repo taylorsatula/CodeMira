@@ -1,9 +1,13 @@
 import json
+import logging
+import threading
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from codemira.config import DaemonConfig
 from codemira.store.manager import StoreManager
+
+log = logging.getLogger(__name__)
 
 
 class RetrieveHandler(BaseHTTPRequestHandler):
@@ -19,11 +23,47 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                 "version": "0.1.0",
             })
             self._send_json(200, response)
+        elif self.path.startswith("/arc"):
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            session_id = params.get("session_id", [""])[0]
+            project_dir = params.get("project_dir", [""])[0]
+            if not session_id or not project_dir:
+                self._send_json(400, json.dumps({"error": "session_id and project_dir required"}))
+                return
+            try:
+                conn, _ = self.manager.get(project_dir)
+                from codemira.store.db import get_arc_summary
+                arc = get_arc_summary(conn, session_id)
+                topology = arc["topology"] if arc else None
+                self._send_json(200, json.dumps({"topology": topology, "session_id": session_id}))
+            except Exception as e:
+                self._send_json(500, json.dumps({"error": str(e)}))
         else:
             self._send_json(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
-        if self.path == "/retrieve":
+        if self.path == "/arc/generate":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                self._send_json(400, json.dumps({"error": "invalid json"}))
+                return
+            session_id = data.get("session_id", "")
+            project_dir = data.get("project_dir", "")
+            if not session_id or not project_dir:
+                self._send_json(400, json.dumps({"error": "session_id and project_dir required"}))
+                return
+            self._send_json(202, json.dumps({"status": "generating"}))
+            threading.Thread(
+                target=self._generate_arc,
+                args=(session_id, project_dir),
+                daemon=True,
+            ).start()
+        elif self.path == "/retrieve":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
             try:
@@ -57,6 +97,30 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                 self._send_json(500, json.dumps({"error": str(e)}))
         else:
             self._send_json(404, json.dumps({"error": "not found"}))
+
+    def _generate_arc(self, session_id: str, project_dir: str):
+        try:
+            conn, _ = self.manager.get(project_dir)
+            from codemira.opencode_db import discover_opencode_db, open_opencode_db
+            opencode_db_path = discover_opencode_db(self.config.opencode_db_path)
+            opencode_conn = open_opencode_db(opencode_db_path)
+            try:
+                from codemira.summarization.handler import generate_arc_summary
+                import os
+                prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "prompts")
+                generate_arc_summary(
+                    session_id=session_id,
+                    opencode_conn=opencode_conn,
+                    memory_conn=conn,
+                    model=self.config.arc_summary_model,
+                    ollama_url=self.config.ollama_url,
+                    prompts_dir=prompts_dir,
+                    context_length=self.config.arc_summary_model_context_length,
+                )
+            finally:
+                opencode_conn.close()
+        except Exception as e:
+            log.error("Background arc generation failed for session %s: %s", session_id, e)
 
     def _send_json(self, code: int, body: str):
         self.send_response(code)

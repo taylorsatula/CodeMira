@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS extraction_log (
     is_complete INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS arc_summaries (
+    session_id TEXT PRIMARY KEY,
+    topology TEXT NOT NULL,
+    message_count INTEGER NOT NULL,
+    generated_at TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(text, content='memories', content_rowid='rowid');
 
 CREATE TRIGGER IF NOT EXISTS memories_fts_insert AFTER INSERT ON memories BEGIN
@@ -277,3 +284,22 @@ def is_session_extracted(conn: sqlite3.Connection, session_id: str) -> bool:
 def get_existing_memory_texts(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute("SELECT text FROM memories WHERE is_archived = 0").fetchall()
     return [r["text"] for r in rows]
+
+
+def upsert_arc_summary(conn: sqlite3.Connection, session_id: str, topology: str, message_count: int):
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO arc_summaries (session_id, topology, message_count, generated_at) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(session_id) DO UPDATE SET "
+        "topology = excluded.topology, "
+        "message_count = excluded.message_count, "
+        "generated_at = excluded.generated_at",
+        (session_id, topology, message_count, now),
+    )
+    conn.commit()
+
+
+def get_arc_summary(conn: sqlite3.Connection, session_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM arc_summaries WHERE session_id = ?", (session_id,)).fetchone()
+    return dict(row) if row else None

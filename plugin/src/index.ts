@@ -2,11 +2,12 @@ import { readFileSync } from "fs"
 import { join } from "path"
 import { randomBytes } from "crypto"
 import {
-  extractToolTrace,
-  extractUserGoal,
+  extractCurrentTurnContext,
   formatPinnedMemories,
   parseSubcorticalXml,
   formatHud,
+  triggerArcGeneration,
+  fetchArcSummary,
   type Memory,
 } from "./pure.ts"
 
@@ -107,6 +108,9 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
   let pinnedMemories: Memory[] = []
   let daemonUnavailable = false
   let healthCheckCounter = 0
+  let lastUserMessage = ""
+  let lastSessionId = ""
+  let cachedArc = ""
 
   const promptsDir = join(import.meta.dir, "..", "..", "prompts")
   const subcorticalSystemPrompt = readFileSync(join(promptsDir, "subcortical_system.txt"), "utf-8")
@@ -124,17 +128,36 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
       }
 
       try {
-        const toolTrace = extractToolTrace(output.messages, config.toolTraceWindow)
-        const userGoal = extractUserGoal(output.messages)
-        if (toolTrace.length === 0 && pinnedMemories.length === 0 && !userGoal) return
+        const { userMessage, toolTrace } = extractCurrentTurnContext(output.messages, 20)
+        
+        if (toolTrace.length === 0 && pinnedMemories.length === 0 && !userMessage) return
+
+        const lastMsg = output.messages[output.messages.length - 1]
+        const sessionID = lastMsg?.info?.sessionID || ""
+
+        if (sessionID !== lastSessionId) {
+          lastSessionId = sessionID
+          cachedArc = ""
+        }
+
+        if (userMessage && userMessage !== lastUserMessage) {
+          lastUserMessage = userMessage
+          triggerArcGeneration(config.daemonUrl, sessionID, input.worktree)
+        }
+
+        const arcTopology = await fetchArcSummary(config.daemonUrl, sessionID, input.worktree)
+        if (arcTopology) {
+          cachedArc = arcTopology
+        }
 
         const recentActions = toolTrace.join("\n")
         const pinnedMemoriesStr = formatPinnedMemories(pinnedMemories, config.memoryTruncationWords)
 
         const userPrompt = subcorticalUserTemplate
-          .replace("{user_message}", userGoal)
+          .replace("{user_message}", userMessage)
           .replace("{recent_actions}", recentActions)
           .replace("{pinned_memories}", pinnedMemoriesStr)
+          .replace("{conversation_arc}", cachedArc || "None")
 
         const subcorticalResult = await callOllama(
           subcorticalSystemPrompt,
@@ -163,8 +186,6 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
         const hudText = formatHud(memories, config.memoryTruncationWords)
         if (!hudText) return
 
-        const lastMsg = output.messages[output.messages.length - 1]
-        const sessionID = lastMsg?.info?.sessionID || ""
         const agent = lastMsg?.info?.agent || "code"
         const model = lastMsg?.info?.model || { providerID: "anthropic", modelID: "claude-sonnet-4-20250514" }
 
