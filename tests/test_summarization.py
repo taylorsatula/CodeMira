@@ -1,4 +1,4 @@
-from codemira.summarization.handler import _format_raw_transcript, split_into_turns, _chunk_transcript
+from codemira.summarization.arc import _format_raw_transcript, split_into_turns, _chunk_transcript
 
 
 class TestFormatRawTranscript:

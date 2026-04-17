@@ -19,6 +19,8 @@ export type DaemonError = "timeout" | "down" | "bad_response" | "not_found"
 export type DaemonResult<T> = { ok: T } | { error: DaemonError }
 
 const DEFAULT_TIMEOUT_MS = 2000
+const USER_MESSAGE_CHARS = 500
+const TOOL_RESULT_CHARS = 80
 
 export async function daemonCall<T = undefined>(
   daemonUrl: string,
@@ -58,7 +60,7 @@ export async function daemonCall<T = undefined>(
   }
 }
 
-export function extractCurrentTurnContext(
+export function pickRecentTurnContext(
   messages: { info: any; parts: any[] }[],
   toolWindow: number,
 ): { userMessage: string; recentActions: RecentAction[] } {
@@ -76,7 +78,7 @@ export function extractCurrentTurnContext(
           const input = part.state.input || {}
           const title = part.state.title || ""
           const target = input.path || input.command || input.pattern || ""
-          const result = title || (part.state.output || "").slice(0, 80)
+          const result = title || (part.state.output || "").slice(0, TOOL_RESULT_CHARS)
           recentActions.unshift({ tool, target, result })
         }
       }
@@ -84,7 +86,7 @@ export function extractCurrentTurnContext(
       let foundRealUserMessage = false
       for (const part of msg.parts) {
         if (part.type === "text" && !part.synthetic) {
-          userMessage = part.text.slice(0, 500)
+          userMessage = part.text.slice(0, USER_MESSAGE_CHARS)
           foundRealUserMessage = true
           break
         }

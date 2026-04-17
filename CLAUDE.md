@@ -64,8 +64,29 @@ Type hints are executable documentation. Avoid `Optional[X]`. Use `TypedDict` or
 
 **Replace positional tuples with named structures**: When a function returns multiple related values, use a dataclass or TypedDict. Named access like `result.memory_id` is self-documenting; positional `result[0]` requires memorizing order.
 
-#### Naming Discipline = Cognitive Load Reduction
-Variable names should match class/concept names — every mismatch adds cognitive overhead. `MemoryIndex` → `memory_index`, not `idx` or `vector_db`. Pick one term per concept (memory vs. note, extraction vs. processing, project vs. workspace). Method names match action — `extract_memories()` actually extracts, `is_duplicate_vector()` actually checks duplicates.
+#### Naming Discipline = Predictable Code
+
+**The predictability test**: a name is right when a careful reader can predict the body from the call site. If they have to open the body to know what it does, the name has failed. Six rules follow from this single test.
+
+**Rule 1 — Verbs carry cost class.** A function's verb signals what it costs to call:
+- *Pure / no-I/O*: `get_*`, `is_*`, `has_*`, `format_*`, `render_*`, `parse_*`, `build_*`, `pick_*`, `collect_*`.
+- *Local I/O (single SQLite read/write)*: `read_*`, `insert_*`, `update_*`, `link_*`, `archive_*`, `log_*`.
+- *Network I/O or LLM call*: `call_*`, `embed_*`, `extract_*`, `consolidate_*`, `classify_*`, `compress_*`, `generate_*`.
+- *Multi-step pipeline*: name the outcome (`extract_session_memories`), not the verb (`process_*`).
+
+Banned function-name verbs: `process`, `handle`, `do`, `note`, `apply`, `execute`. They predict nothing about cost or behavior. `run_*` is reserved for top-level entry points (`run_daemon`, `run_consolidation`) — never mid-pipeline.
+
+**Rule 2 — One noun per concept across all surfaces.** Pick the canonical noun and use it for storage (table/column), code (function/class/var), config (env/field), wire (HTTP body/query), and docs (CLAUDE.md/README/prompt slot). Test: `grep <noun>` returns the entire concept's footprint. If grep splits across two terms, the *model* is wrong, not just the name. Anti-example: a single concept appearing as `arc_fragments` table + `get_arc_summary` function + `arc_summary_model` config + `topology` wire field is four names for one thing — collapse to one canonical noun (`arc`) at every surface.
+
+**Rule 3 — Files name a role; directories name a concept.** Use `<concept>/<role>.py` where role is a single noun describing what the file does for the concept (`extraction/extractor.py`, `extraction/chunker.py`, `extraction/dedup.py`). Banned filenames: `handler.py`, `helper.py`, `utils.py`. `manager.py` is allowed only when the file actually exports a `*Manager` class (`store/manager.py` exports `StoreManager` — fine).
+
+**Rule 4 — Specificity lives in values, not parameter slots.** A parameter name describes its type/role; the call site's variable describes the specific instance. Write `extract_memories(model: str, ...)`; call as `extract_memories(config.extraction_model, ...)`. The function takes "a model"; the caller picks "the extraction model." Repeating the role in the parameter slot is redundant with the value and breaks consistency across siblings. Exception: when one function takes two values of the same type (e.g., a primary model and a fallback model), each parameter must disambiguate.
+
+**Rule 5 — Magic numbers are named at module scope.** Truncations, window sizes, context budgets — anything a future change might tune — gets a `MODULE_LEVEL_CONSTANT` so the name appears at both definition and use sites. Inline `text.slice(0, 500)` makes the threshold invisible to grep and impossible to consistency-check across call sites.
+
+**Rule 6 — Cross-boundary case translation is the only place vocabulary changes.** Python = `snake_case`, TypeScript = `camelCase`, wire = `snake_case`. Translation happens *only* at the boundary, in one statement, with both sides visible: `{ session_id: sessionID }`. Local variable names match function parameter names across call boundaries — abbreviating `memory_id` to `mid` for seven lines and then handing it to a function that calls it `memory_id` breaks the predictability test at the boundary.
+
+**Retired**: the prior rule "variable names should match class names" (`MemoryIndex` → `memory_index`). When scope makes the short form unambiguous (`store.index` inside a `Store`) or the short form matches stdlib idiom (`conn` for SQLite), the short form is fine and the long form is drift, not consistency.
 
 #### Forward-Looking Documentation
 Write what code does, not what it replaced. Historical context → commit messages, not docstrings.
@@ -83,14 +104,14 @@ Don't parameterize what won't vary. Constants with comments explaining why ("hns
 
 ### Process Topology
 - **Daemon loop** (`daemon/codemira/daemon.py:run_daemon`): polls at `poll_interval_minutes` (default 15). Each cycle: discover OpenCode DB → read project worktrees → find idle sessions → process each (compress → extract → embed → store → link). Consolidation runs at `consolidation_interval_hours` (default 24) across all known project stores.
-- **HTTP bridge** (`daemon/codemira/server.py`): `HTTPServer` on `127.0.0.1:{http_port}` (default 9473). Single-threaded `BaseHTTPRequestHandler`. `POST /retrieve` accepts subcortical output and returns ranked memories; `POST /arc/generate` triggers background arc generation (returns 202 immediately); `GET /arc` returns pre-computed decision topology for a session; `GET /health` reports Ollama and embedding-model status.
+- **HTTP bridge** (`daemon/codemira/server.py`): `HTTPServer` on `127.0.0.1:{http_port}` (default 9473). Single-threaded `BaseHTTPRequestHandler`. `POST /retrieve` accepts subcortical output and returns ranked memories; `POST /arc/generate` triggers background arc generation (returns 202 immediately); `GET /arc` returns the pre-computed arc for a session; `GET /health` reports Ollama and embedding-model status.
 - **Plugin hook** (`plugin/src/index.ts`): closure over pinned-memory state. Fires on every `experimental.chat.messages.transform`. Detects new user messages to trigger arc generation fire-and-forget. Fetches pre-computed arc on each hook call. Pure transforms live in `plugin/src/pure.ts` so they can be unit-tested under Bun without a running OpenCode.
 
 ### Extraction Triggers (Two Paths)
-Extraction can fire on either of two triggers, both calling into `process_idle_session()` (`daemon/codemira/daemon.py:46`):
+Extraction can fire on either of two triggers, both calling into `extract_session_memories()` (`daemon/codemira/daemon.py:39`):
 
 1. **Idle poll** (safety net): the daemon's main loop in `run_daemon()` checks for sessions whose `time_updated` is older than `idle_threshold_minutes` (default 60) every `poll_interval_minutes` (default 15). Catches sessions that go quiet without ever compacting.
-2. **Compaction-triggered** (primary): the plugin's `event` hook listens for OpenCode's `session.compacted` bus event and POSTs `{session_id, project_dir}` to `/extract` on the daemon. The daemon spawns a background thread that runs `process_idle_session()` immediately, so memories are written before the original messages would otherwise leave the LLM's context window.
+2. **Compaction-triggered** (primary): the plugin's `event` hook listens for OpenCode's `session.compacted` bus event and POSTs `{session_id, project_root}` to `/extract` on the daemon. The daemon spawns a background thread that runs `extract_session_memories()` immediately, so memories are written before the original messages would otherwise leave the LLM's context window.
 
 The `extraction_log` table prevents duplicate work: the `/extract` handler (`server.py:_extract_session`) calls `is_session_extracted()` first and no-ops if the session is already complete; the polling loop's `_collect_extracted_session_ids()` filter (`daemon.py:136`) likewise skips sessions the compaction path already processed. Compaction does NOT delete messages from OpenCode's SQLite — `MessageV2.filterCompactedEffect` filters them at read-time — so `read_session_conversation()` (`opencode_db.py:67`) sees the full pre-compaction transcript regardless of which trigger fires.
 
@@ -106,16 +127,16 @@ The daemon keys per-project stores by `project.worktree` from OpenCode's SQLite.
 ### Storage Model
 `memories.db` (SQLite WAL) is the source of truth. `memories.index` (hnswlib) is a rebuildable cache — never authoritative. Every write path calls `MemoryIndex.rebuild_after_write(conn)`. FTS5 stays in sync via three triggers (insert/update/delete) because `content='memories'` doesn't auto-sync.
 
-### Arc Summarizer (Decision Topology)
-The arc summarizer generates a structural decision topology of the conversation on demand. It is NOT part of the periodic extraction pipeline — it runs in the background when triggered by the plugin.
+### Arc Summarizer
+The arc summarizer generates a structural decision tree (an "arc") of the conversation on demand. It is NOT part of the periodic extraction pipeline — it runs in the background when triggered by the plugin.
 
-- **On-demand generation**: The plugin fires `POST /arc/generate` (fire-and-forget, no await) when it detects a new user message. The daemon spawns a background thread that reads the full conversation from OpenCode's SQLite, formats it into a lightweight flat transcript (no Ollama compression pass), chunks it if it exceeds the model context window, and runs `call_ollama()` per chunk with frozen-prefix incremental chunking. The result is stored in the `arc_summaries` table in the project's `memories.db`.
-- **Arc retrieval**: The plugin fetches `GET /arc?session_id=...&project_root=...` on each hook call. If no arc exists yet, `{topology: null}` is returned and the plugin omits the `<conversation_arc>` block.
-- **Dedicated table**: `arc_summaries` (session_id PK, topology, message_count, generated_at) stores transient session state. Arcs are not embedded, not indexed, and do not participate in retrieval, hub discovery, or consolidation.
-- **No double-compression**: The arc summarizer formats the raw conversation directly (tool name + title/output[:500]) instead of running `compress_tool_calls()`. The arc model produces its own structural abstraction — pre-compressing adds Ollama round-trips with no benefit.
+- **On-demand generation**: The plugin fires `POST /arc/generate` (fire-and-forget, no await) when it detects a new user message. The daemon spawns a background thread that reads the full conversation from OpenCode's SQLite, formats it into a lightweight flat transcript (no Ollama compression pass), chunks it if it exceeds the model context window, and runs `call_ollama()` per chunk with frozen-prefix incremental chunking. The result is stored in the `arc_fragments` table in the project's `memories.db`.
+- **Arc retrieval**: The plugin fetches `GET /arc?session_id=...&project_root=...` on each hook call. If no arc exists yet, `{arc: null}` is returned and the plugin omits the `<conversation_arc>` block.
+- **Dedicated table**: `arc_fragments` (session_id, fragment_index PK, arc_text, content_hash, message_count, generated_at) stores transient session state as incremental fragments. The full arc is the concatenation of fragments in order. Arcs are not embedded, not indexed, and do not participate in retrieval, hub discovery, or consolidation.
+- **No double-compression**: The arc summarizer formats the raw conversation directly (tool name + title/output[:500]) instead of running tool compression via `ollama_tool_compressor`. The arc model produces its own structural abstraction — pre-compressing adds Ollama round-trips with no benefit.
 - **Incremental chunking with frozen prefixes**: Chunks split at `User:` turn boundaries. Once a chunk's arc is generated, it is frozen and prepended verbatim to the next chunk as context. Old chunks are never re-processed. The final arc is the concatenation of all chunk arc fragments.
-- **Model**: Defaults to `gemma4:e4b` (configurable via `arc_summary_model`). Config: `arc_summary_model_context_length` (default 128000).
-- **Handler**: `daemon/codemira/summarization/handler.py:generate_arc_summary()` is the entry point.
+- **Model**: Defaults to `gemma4:e4b` (configurable via `arc_model`). Config: `arc_model_context_length` (default 128000).
+- **Entry point**: `daemon/codemira/summarization/arc.py:generate_arc()`.
 
 ## 🧭 Codebase Patterns
 
@@ -126,7 +147,7 @@ All LLM prompts live in `prompts/*.txt` and are loaded via `load_prompt(name, pr
 All Ollama calls go through `call_ollama()` in `daemon/codemira/extraction/compressor.py` using `urllib.request`. No `ollama-python` dependency. The plugin side uses `fetch()` for the same reason (stdlib everywhere).
 
 ### Chunked Extraction for Long Conversations
-`chunk_compressed_transcript()` in `daemon/codemira/extraction/chunker.py` splits the compressed transcript when it exceeds the extraction model's context window. Chunk target = `max(75_000, 0.7 * extraction_model_context_length)` tokens, minus prompt overhead (`PROMPT_OVERHEAD_TOKENS = 2048`) and existing-memories token estimate. Chunks are split at user-message boundaries (`User:` prefixes) via `_split_into_turns()` — each turn includes its user message and all subsequent `Assistant:`/`Tool:` lines until the next `User:` line, so tool call chains are never split mid-stream. Each chunk is extracted sequentially via `extract_memories()` with `prior_chunk_texts` — memories from earlier chunks are injected into the `{existing_memories}` prompt section under a `--- Previously extracted from this session ---` separator, and dedup checks run against both DB memories and prior-chunk texts. This prevents duplication while enriching context for later chunks. Short conversations that fit in one chunk are unchanged (single-element list returned).
+`chunk_compressed_transcript()` in `daemon/codemira/extraction/chunker.py` splits the compressed transcript when it exceeds the extraction model's context window. Chunk target = `max(75_000, 0.7 * extraction_model_context_length)` tokens, minus prompt overhead (`PROMPT_OVERHEAD_TOKENS = 2048`) and existing-memories token estimate. Chunks are split at user-message boundaries (`User:` prefixes) via `split_into_turns()` — each turn includes its user message and all subsequent `Assistant:`/`Tool:` lines until the next `User:` line, so tool call chains are never split mid-stream. Each chunk is extracted sequentially via `extract_memories()` with `prior_chunk_texts` — memories from earlier chunks are injected into the `{existing_memories}` prompt section under a `--- Previously extracted from this session ---` separator, and dedup checks run against both DB memories and prior-chunk texts. This prevents duplication while enriching context for later chunks. Short conversations that fit in one chunk are unchanged (single-element list returned).
 
 ### Entity Extraction is LLM-Based
 `daemon/codemira/extraction/dedup.py:extract_entities` calls `gemma4:e2b` via Ollama with `prompts/entity_extraction_*.txt`. The model returns a JSON array of `{name, type}` entries. `name` is lowercased and deduped; `type` is validated against `VALID_ENTITY_TYPES` and falls back to `"other"`. `VALID_ENTITY_TYPES` = `{library, framework, tool, pattern, protocol, error, project_concept, other}`. Project-specific named concepts (modules, subsystems, project-internal terms like "peanutgallery", "domaindocs") are `project_concept` — the highest-value entity type for hub discovery because they link to `vocabulary` category memories that ecosystem terms cannot surface. Callers pass `model`, `ollama_url`, and `prompts_dir` explicitly — there are no defaults.
@@ -138,7 +159,7 @@ All Ollama calls go through `call_ollama()` in `daemon/codemira/extraction/compr
 `ExtractionError` (`daemon/codemira/errors.py`) marks non-retryable extraction failures — the LLM returned unparseable output or an unexpected response structure. Retrying the same conversation will likely produce the same result, so the session is logged to `extraction_log` and skipped on future cycles. Infrastructure failures (`URLError`, `HTTPError`, `sqlite3.OperationalError`) are NOT `ExtractionError` — they propagate to allow retry when the outage resolves. `call_ollama()` and `call_api_model()` raise `ExtractionError` for bad JSON bodies or missing keys in otherwise successful HTTP responses; network errors still propagate as `URLError`/`HTTPError`.
 
 ### Extraction Skip Mechanism
-The `extraction_log` table (`session_id`, `extracted_at`, `memory_count`, `attempt_count`, `is_complete`) prevents re-processing. `is_complete = 1` means the session is done (successfully extracted, non-retryable error, or max attempts exhausted). `is_complete = 0` with `attempt_count < max_extraction_attempts` means the session had an infrastructure failure and should be retried. `_collect_extracted_session_ids` only returns `is_complete = 1` rows. Every code path out of `process_idle_session` MUST call `log_extraction()` — complete paths with `is_complete=True`, infra-failure paths with `is_complete=False`. After `is_complete=False` logging, if `attempt_count >= max_extraction_attempts` (default 3), `mark_extraction_complete()` marks the session unextractable and the exception is suppressed (no re-raise). Otherwise the exception propagates for retry on the next poll cycle.
+The `extraction_log` table (`session_id`, `extracted_at`, `memory_count`, `attempt_count`, `is_complete`) prevents re-processing. `is_complete = 1` means the session is done (successfully extracted, non-retryable error, or max attempts exhausted). `is_complete = 0` with `attempt_count < max_extraction_attempts` means the session had an infrastructure failure and should be retried. `_collect_extracted_session_ids` only returns `is_complete = 1` rows. Every code path out of `extract_session_memories` MUST call `log_extraction()` — complete paths with `is_complete=True`, infra-failure paths with `is_complete=False`. After `is_complete=False` logging, if `attempt_count >= max_extraction_attempts` (default 3), `mark_extraction_complete()` marks the session unextractable and the exception is suppressed (no re-raise). Otherwise the exception propagates for retry on the next poll cycle.
 
 ### HUD Injection
 The plugin generates fresh `msg_<26hex>` / `prt_<26hex>` IDs on every call (via `randomBytes(13).toString("hex")`) and pushes a `user` message with a synthetic text part containing the HUD. The IDs never touch OpenCode's DB — they live only in the in-memory `output.messages` array the hook mutates. No cleanup logic; messages are re-fetched from DB every iteration, so stale HUDs can't accumulate.
@@ -205,7 +226,7 @@ Config objects use `pydantic-settings.BaseSettings`. See `daemon/codemira/config
 **Mitigation**: Keep `is_duplicate_text` thresholds conservative enough to catch near-duplicates without a vector signal.
 
 ## ❌ Extraction Path Without log_extraction
-**Wrong**: Returning early from `process_idle_session` without calling `log_extraction` (e.g., empty-conversation early return, exception mid-pipeline).
+**Wrong**: Returning early from `extract_session_memories` without calling `log_extraction` (e.g., empty-conversation early return, exception mid-pipeline).
 **Right**: Every exit path calls `log_extraction(memory_conn, session_id, count)`. For `ExtractionError` catch with count 0. For infra-failure paths with `is_complete=False`; then check `attempt_count >= max_extraction_attempts` and call `mark_extraction_complete()` if so, otherwise re-raise.
 **Why it matters**: Without logging, the session retries every poll cycle (15 min), re-incurring expensive Ollama compression calls (one per tool invocation). A single missing `log_extraction` call can burn LLM tokens indefinitely.
 

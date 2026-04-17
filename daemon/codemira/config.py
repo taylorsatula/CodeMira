@@ -28,8 +28,8 @@ class DaemonConfig(BaseSettings):
     max_extraction_attempts: int = 3
     opencode_db_path: str | None = None
     # Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
-    arc_summary_model: str = "gemma4:e2b"
-    arc_summary_model_context_length: int = 128000
+    arc_model: str = "gemma4:e2b"
+    arc_model_context_length: int = 128000
     arc_chunk_target_tokens: int = 30_000
     loud: bool = False
 

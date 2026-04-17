@@ -2,7 +2,7 @@ import { readFileSync } from "fs"
 import { join } from "path"
 import { randomBytes } from "crypto"
 import {
-  extractCurrentTurnContext,
+  pickRecentTurnContext,
   formatPinnedMemories,
   parseSubcorticalXml,
   formatHud,
@@ -94,7 +94,7 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
   const subcorticalSystemPrompt = readFileSync(join(promptsDir, "subcortical_system.txt"), "utf-8")
   const subcorticalUserTemplate = readFileSync(join(promptsDir, "subcortical_user.txt"), "utf-8")
 
-  function noteResult<T>(result: DaemonResult<T>): DaemonResult<T> {
+  function trackHealth<T>(result: DaemonResult<T>): DaemonResult<T> {
     if ("error" in result && (result.error === "down" || result.error === "timeout")) {
       daemonUnavailable = true
     } else if ("ok" in result) {
@@ -112,7 +112,7 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
       }
 
       try {
-        const { userMessage, recentActions } = extractCurrentTurnContext(output.messages, 20)
+        const { userMessage, recentActions } = pickRecentTurnContext(output.messages, 20)
 
         if (recentActions.length === 0 && pinnedMemories.length === 0 && !userMessage) return
 
@@ -134,16 +134,16 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           )
         }
 
-        const arcResult = noteResult(
-          await daemonCall<{ topology: string | null }>(
+        const arcResult = trackHealth(
+          await daemonCall<{ arc: string | null }>(
             config.daemonUrl, "GET",
             `/arc?session_id=${encodeURIComponent(sessionID)}&project_root=${encodeURIComponent(projectRoot)}`,
             null,
             { expect: "result" },
           )
         )
-        if ("ok" in arcResult && arcResult.ok.topology) {
-          cachedArc = arcResult.ok.topology
+        if ("ok" in arcResult && arcResult.ok.arc) {
+          cachedArc = arcResult.ok.arc
         }
 
         const recentActionsStr = recentActions
@@ -174,7 +174,7 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
 
         const pinnedIds = keep.length > 0 ? keep : pinnedMemories.map((m) => m.id)
 
-        const retrieveResult = noteResult(
+        const retrieveResult = trackHealth(
           await daemonCall<{ memories: Memory[]; degraded: boolean }>(
             config.daemonUrl, "POST", "/retrieve",
             {

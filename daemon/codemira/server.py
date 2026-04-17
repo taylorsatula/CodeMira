@@ -74,11 +74,11 @@ class RetrieveHandler(BaseHTTPRequestHandler):
         if not session_id or not project_root:
             raise _HttpError(400, "session_id and project_root required")
         store = self.manager.get(project_root)
-        from codemira.store.db import get_arc_summary
+        from codemira.store.db import get_arc
         with store.lock:
-            arc = get_arc_summary(store.conn, session_id)
-        topology = arc["topology"] if arc else None
-        return {"topology": topology, "session_id": session_id}
+            arc_record = get_arc(store.conn, session_id)
+        arc = arc_record["arc"] if arc_record else None
+        return {"arc": arc, "session_id": session_id}
 
     def _handle_arc_generate(self, data: dict) -> tuple[int, dict]:
         self._run_in_background(self._generate_arc, data["session_id"], data["project_root"])
@@ -124,14 +124,14 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                     return
             from codemira.opencode_db import OpenCodeConnection
             with OpenCodeConnection(self.config.opencode_db_path) as opencode_conn:
-                from codemira.daemon import process_idle_session
+                from codemira.daemon import extract_session_memories
                 ctx = ExtractionContext(
                     store=store,
                     opencode_conn=opencode_conn,
                     prompts_dir=self.prompts_dir,
                     api_key=os.environ["OPENROUTER_API_KEY"],
                 )
-                process_idle_session(session_id, project_root, ctx, self.config)
+                extract_session_memories(session_id, project_root, ctx, self.config)
         except Exception as e:
             log.error("Compaction-triggered extraction failed for session %s: %s", session_id, e)
 
@@ -140,20 +140,20 @@ class RetrieveHandler(BaseHTTPRequestHandler):
             store = self.manager.get(project_root)
             from codemira.opencode_db import OpenCodeConnection
             with OpenCodeConnection(self.config.opencode_db_path) as opencode_conn:
-                from codemira.summarization.handler import generate_arc_summary
+                from codemira.summarization.arc import generate_arc
                 with store.lock:
-                    topology = generate_arc_summary(
+                    arc = generate_arc(
                         session_id=session_id,
                         opencode_conn=opencode_conn,
                         memory_conn=store.conn,
-                        model=self.config.arc_summary_model,
+                        model=self.config.arc_model,
                         ollama_url=self.config.ollama_url,
                         prompts_dir=self.prompts_dir,
-                        context_length=self.config.arc_summary_model_context_length,
+                        context_length=self.config.arc_model_context_length,
                         chunk_target_tokens=self.config.arc_chunk_target_tokens,
                     )
-                if self.config.loud and topology:
-                    log.info("── Arc topology for session %s ──\n%s", session_id, topology)
+                if self.config.loud and arc:
+                    log.info("── Arc for session %s ──\n%s", session_id, arc)
         except Exception as e:
             log.error("Background arc generation failed for session %s: %s", session_id, e)
 

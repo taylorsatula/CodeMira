@@ -69,7 +69,7 @@ Request:
   "query_expansion": "implementing OAuth refresh token rotation; token expiry and renewal patterns",
   "entities": ["OAuth", "refresh_token"],
   "pinned_memory_ids": ["mem_a1b2c3d4", "mem_e5f6g7h8"],
-  "project_dir": "/Users/dev/myproject"
+  "project_root": "/Users/dev/myproject"
 }
 ```
 
@@ -172,7 +172,7 @@ Runtime target: <100ms on Q4 quantization.
 
 ### Step 3: Call Daemon /retrieve
 
-Send `{query_expansion, entities, pinned_memory_ids, project_dir}` to `POST /retrieve` on the daemon's HTTP server. The daemon handles embedding, hybrid search, hub discovery, retention filtering, and capping internally. Returns the final surfaced memories ready for HUD injection.
+Send `{query_expansion, entities, pinned_memory_ids, project_root}` to `POST /retrieve` on the daemon's HTTP server. The daemon handles embedding, hybrid search, hub discovery, retention filtering, and capping internally. Returns the final surfaced memories ready for HUD injection.
 
 If the daemon is unreachable, set the `daemonUnavailable` flag and skip HUD injection for this and subsequent calls. Periodically retry via `/health`.
 

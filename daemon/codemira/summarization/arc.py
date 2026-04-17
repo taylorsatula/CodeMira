@@ -37,7 +37,7 @@ def _chunk_transcript(transcript: str, context_length: int, chunk_target_tokens:
     return pack_turns_into_chunks(transcript, chunk_budget)
 
 
-def generate_arc_summary(
+def generate_arc(
     session_id: str,
     opencode_conn: sqlite3.Connection,
     memory_conn: sqlite3.Connection,
@@ -80,8 +80,8 @@ def generate_arc_summary(
     prior_arc = ""
     arc_parts: list[str] = []
     for i in range(first_dirty):
-        arc_parts.append(existing_by_index[i]["topology"])
-        prior_arc = existing_by_index[i]["topology"]
+        arc_parts.append(existing_by_index[i]["arc_text"])
+        prior_arc = existing_by_index[i]["arc_text"]
 
     # Process dirty and new chunks.
     for i in range(first_dirty, len(chunks)):
@@ -97,5 +97,5 @@ def generate_arc_summary(
         upsert_arc_fragment(memory_conn, session_id, i, fragment, _chunk_hash(chunks[i]), len(conversation))
         prior_arc = fragment
 
-    topology = "\n".join(arc_parts)
-    return topology
+    arc = "\n".join(arc_parts)
+    return arc

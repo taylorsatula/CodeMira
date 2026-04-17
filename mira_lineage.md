@@ -81,13 +81,13 @@ Concept-by-concept mapping between Mira (`../botwithmemory`) and CodeMira. Each 
 ## 13. Consolidation / decay
 
 - **Mira**: continuous decay via `scoring_formula.sql` (multi-axis sigmoid: value, hub, mention, newness, recency, temporal). Memories die unless they earn it.
-- **CodeMira**: `daemon/codemira/consolidation/cluster.py:find_clusters` + `consolidation/handler.py:consolidate_cluster` (line 20) + `run_consolidation` (line 73), runs every `consolidation_interval_hours` (default 24). Clusters near-duplicates and merges via LLM.
+- **CodeMira**: `daemon/codemira/consolidation/cluster.py:find_clusters` + `consolidation/consolidator.py:consolidate_cluster` (line 20) + `run_consolidation` (line 73), runs every `consolidation_interval_hours` (default 24). Clusters near-duplicates and merges via LLM.
 - *Pin*: **conceptually different.** Mira's decay is a continuous SQL-side scoring function; CodeMira's is a periodic batch dedup-and-merge. Same goal (prevent rot), different mechanism. If you ever wanted Mira-style continuous decay in CodeMira, this is the gap to close.
 
 ## 14. Storage
 
 - **Mira**: Postgres + pgvector + RLS by user_id.
-- **CodeMira**: SQLite WAL + FTS5 triggers + hnswlib cache, scoped by `project.worktree`. `store/manager.py:StoreManager.get(project_dir)` returns `(conn, index)`. Schema in `store/db.py:init_schema` (line 73). Project root resolution via `manager.py:project_store_paths` (line 15).
+- **CodeMira**: SQLite WAL + FTS5 triggers + hnswlib cache, scoped by `project.worktree`. `store/manager.py:StoreManager.get(project_root)` returns a `Store` dataclass (`conn`, `index`, `lock`). Schema in `store/db.py:init_schema` (line 73). Project root resolution via `manager.py:project_store_paths` (line 15).
 - *Pin*: user-scoped → project-scoped. The boundary moved from "who" to "where."
 
 ## 15. Extraction skip / idempotency
@@ -108,8 +108,8 @@ When Taylor speaks in Mira vocabulary, look here first:
 | "entities are X" | `prompts/entity_extraction_*.txt` + `extraction/dedup.py:VALID_ENTITY_TYPES` |
 | "subcortical should..." | `plugin/src/index.ts:callOllama` + `prompts/subcortical_*.txt` + `pure.ts:parseSubcorticalXml` |
 | "hub discovery / link expansion" | `retrieval/hub_discovery.py` |
-| "consolidation / decay" | `consolidation/handler.py` + `consolidation/cluster.py` |
-| "segment collapse" | `daemon.py:process_idle_session` (the analog) |
+| "consolidation / decay" | `consolidation/consolidator.py` + `consolidation/cluster.py` |
+| "segment collapse" | `daemon.py:extract_session_memories` (the analog) |
 | "RLS / user scoping" | `store/manager.py:project_store_paths` (project, not user) |
 | "memory schema" | `store/db.py:init_schema` |
 | "HUD / surfacing format" | `plugin/src/pure.ts:formatHud` |

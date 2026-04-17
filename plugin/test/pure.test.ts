@@ -1,6 +1,6 @@
 import { describe, test, expect, spyOn } from "bun:test"
 import {
-  extractCurrentTurnContext,
+  pickRecentTurnContext,
   formatPinnedMemories,
   parseSubcorticalXml,
   formatHud,
@@ -38,7 +38,7 @@ function makeToolPart(tool: string, input: Record<string, string>, output: strin
 
 const mem: Memory = { id: "abc123", text: "Prefers threading over asyncio for concurrent I/O", category: "priority" }
 
-describe("extractCurrentTurnContext", () => {
+describe("pickRecentTurnContext", () => {
   test("extracts completed tool calls and user message for the current turn", () => {
     const messages = [
       makeUserMsg("Run the tests"),
@@ -46,7 +46,7 @@ describe("extractCurrentTurnContext", () => {
         makeToolPart("bash", { command: "pytest" }, "3 passed", "Ran pytest"),
       ]),
     ]
-    const { userMessage, recentActions } = extractCurrentTurnContext(messages, 20)
+    const { userMessage, recentActions } = pickRecentTurnContext(messages, 20)
     expect(recentActions.length).toBe(1)
     expect(recentActions[0].tool).toBe("bash")
     expect(recentActions[0].target).toBe("pytest")
@@ -62,7 +62,7 @@ describe("extractCurrentTurnContext", () => {
         { type: "tool", callID: "c2", tool: "read", state: { status: "running", input: { path: "file.ts" } } },
       ]),
     ]
-    const { recentActions } = extractCurrentTurnContext(messages, 20)
+    const { recentActions } = pickRecentTurnContext(messages, 20)
     expect(recentActions.length).toBe(0)
   })
 
@@ -74,7 +74,7 @@ describe("extractCurrentTurnContext", () => {
       makeAssistantMsg([makeToolPart("bash", { command: "cmd3" }, "out3", "title3")]),
       makeAssistantMsg([makeToolPart("bash", { command: "cmd4" }, "out4", "title4")]),
     ]
-    const { recentActions } = extractCurrentTurnContext(messages, 2)
+    const { recentActions } = pickRecentTurnContext(messages, 2)
     expect(recentActions.length).toBe(2)
   })
 
@@ -85,16 +85,16 @@ describe("extractCurrentTurnContext", () => {
       makeUserMsg("New question"),
       makeAssistantMsg([makeToolPart("bash", { command: "new_cmd" }, "out", "new")]),
     ]
-    const { userMessage, recentActions } = extractCurrentTurnContext(messages, 20)
+    const { userMessage, recentActions } = pickRecentTurnContext(messages, 20)
     expect(userMessage).toBe("New question")
     expect(recentActions.length).toBe(1)
     expect(recentActions[0].target).toBe("new_cmd")
   })
 
   test("extracts tool target from path, command, or pattern", () => {
-    const pathResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("read", { path: "src/index.ts" }, "content")])], 20)
-    const cmdResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("bash", { command: "npm test" }, "ok")])], 20)
-    const patResult = extractCurrentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("grep", { pattern: "TODO" }, "3 matches")])], 20)
+    const pathResult = pickRecentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("read", { path: "src/index.ts" }, "content")])], 20)
+    const cmdResult = pickRecentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("bash", { command: "npm test" }, "ok")])], 20)
+    const patResult = pickRecentTurnContext([makeUserMsg(""), makeAssistantMsg([makeToolPart("grep", { pattern: "TODO" }, "3 matches")])], 20)
 
     expect(pathResult.recentActions[0].target).toBe("src/index.ts")
     expect(cmdResult.recentActions[0].target).toBe("npm test")
@@ -108,7 +108,7 @@ describe("extractCurrentTurnContext", () => {
         makeToolPart("bash", { command: "ls" }, "file1.txt\nfile2.txt\nfile3.txt", "Listed files"),
       ]),
     ]
-    const { recentActions } = extractCurrentTurnContext(messages, 20)
+    const { recentActions } = pickRecentTurnContext(messages, 20)
     expect(recentActions[0].result).toBe("Listed files")
     expect(recentActions[0].result).not.toContain("file1.txt")
   })
@@ -116,7 +116,7 @@ describe("extractCurrentTurnContext", () => {
   test("truncates user message to 500 characters", () => {
     const longText = "x".repeat(600)
     const messages = [makeUserMsg(longText)]
-    const { userMessage } = extractCurrentTurnContext(messages, 20)
+    const { userMessage } = pickRecentTurnContext(messages, 20)
     expect(userMessage.length).toBe(500)
   })
 
@@ -125,13 +125,13 @@ describe("extractCurrentTurnContext", () => {
       makeUserMsg("Real user message", false),
       makeUserMsg("System reminder", true),
     ]
-    const { userMessage } = extractCurrentTurnContext(messages, 20)
+    const { userMessage } = pickRecentTurnContext(messages, 20)
     expect(userMessage).toBe("Real user message")
   })
 
   test("returns empty when no user messages or tool calls", () => {
     const messages = [makeAssistantMsg([])]
-    const { userMessage, recentActions } = extractCurrentTurnContext(messages, 20)
+    const { userMessage, recentActions } = pickRecentTurnContext(messages, 20)
     expect(userMessage).toBe("")
     expect(recentActions.length).toBe(0)
   })

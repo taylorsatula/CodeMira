@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS extraction_log (
 CREATE TABLE IF NOT EXISTS arc_fragments (
     session_id TEXT,
     fragment_index INTEGER,
-    topology TEXT NOT NULL,
+    arc_text TEXT NOT NULL,
     content_hash TEXT NOT NULL,
     message_count INTEGER NOT NULL,
     generated_at TEXT NOT NULL,
@@ -323,17 +323,17 @@ def get_existing_memory_texts(conn: sqlite3.Connection) -> list[str]:
     return [r["text"] for r in rows]
 
 
-def upsert_arc_fragment(conn: sqlite3.Connection, session_id: str, fragment_index: int, topology: str, content_hash: str, message_count: int):
+def upsert_arc_fragment(conn: sqlite3.Connection, session_id: str, fragment_index: int, arc_text: str, content_hash: str, message_count: int):
     now = _now()
     conn.execute(
-        "INSERT INTO arc_fragments (session_id, fragment_index, topology, content_hash, message_count, generated_at) "
+        "INSERT INTO arc_fragments (session_id, fragment_index, arc_text, content_hash, message_count, generated_at) "
         "VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(session_id, fragment_index) DO UPDATE SET "
-        "topology = excluded.topology, "
+        "arc_text = excluded.arc_text, "
         "content_hash = excluded.content_hash, "
         "message_count = excluded.message_count, "
         "generated_at = excluded.generated_at",
-        (session_id, fragment_index, topology, content_hash, message_count, now),
+        (session_id, fragment_index, arc_text, content_hash, message_count, now),
     )
     conn.commit()
 
@@ -354,17 +354,17 @@ def delete_arc_fragments_from(conn: sqlite3.Connection, session_id: str, from_in
     conn.commit()
 
 
-def get_arc_summary(conn: sqlite3.Connection, session_id: str) -> dict | None:
+def get_arc(conn: sqlite3.Connection, session_id: str) -> dict | None:
     rows = conn.execute(
         "SELECT * FROM arc_fragments WHERE session_id = ? ORDER BY fragment_index ASC",
         (session_id,),
     ).fetchall()
     if not rows:
         return None
-    full_topology = "\n".join(r["topology"] for r in rows)
+    full_arc = "\n".join(r["arc_text"] for r in rows)
     last_row = rows[-1]
     return {
-        "topology": full_topology,
+        "arc": full_arc,
         "message_count": last_row["message_count"],
         "generated_at": last_row["generated_at"]
     }

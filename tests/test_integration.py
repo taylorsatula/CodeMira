@@ -315,14 +315,14 @@ class TestDiscoverOpencodeDb:
 class TestDaemonStartup:
     def test_creates_project_store_on_first_get(self, opencode_setup):
         _, _, tmpdir, _ = opencode_setup
-        project_dir = os.path.join(tmpdir, "some_project")
-        os.makedirs(project_dir, exist_ok=True)
+        project_root = os.path.join(tmpdir, "some_project")
+        os.makedirs(project_root, exist_ok=True)
         from codemira.config import DaemonConfig
         from codemira.store.manager import StoreManager, project_store_paths
         manager = StoreManager(DaemonConfig())
-        store = manager.get(project_dir)
+        store = manager.get(project_root)
         conn, idx = store.conn, store.index
-        _, db_path, _ = project_store_paths(project_dir)
+        _, db_path, _ = project_store_paths(project_root)
         assert os.path.exists(db_path)
         assert os.path.getsize(db_path) > 0, "DB file should not be empty"
         tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -447,14 +447,14 @@ class TestExtractionToRetrievalPipeline:
         from codemira.store.manager import StoreManager
         from codemira.config import DaemonConfig
         from codemira.server import create_server
-        project_dir = os.path.join(tmpdir, "proj_http")
-        os.makedirs(project_dir, exist_ok=True)
+        project_root = os.path.join(tmpdir, "proj_http")
+        os.makedirs(project_root, exist_ok=True)
         manager = StoreManager(DaemonConfig())
-        store = manager.get(project_dir)
+        store = manager.get(project_root)
         conn = store.conn
         emb = _make_embedding(seed=42)
         mid = insert_memory(conn, "Prefers threading over asyncio", "priority", emb, "ses_int")
-        store2 = manager.get(project_dir)
+        store2 = manager.get(project_root)
         idx = store2.index
         idx.rebuild_after_write(store2.conn)
         config = DaemonConfig(http_port=0)
@@ -469,7 +469,7 @@ class TestExtractionToRetrievalPipeline:
                 "query_expansion": "threading asyncio concurrency",
                 "entities": [],
                 "pinned_memory_ids": [],
-                "project_root": project_dir,
+                "project_root": project_root,
                 "query_embedding": emb,
             }).encode()
             req = urllib.request.Request(
@@ -571,8 +571,9 @@ class TestOllamaCompression:
         with pytest.raises(Exception):
             call_ollama("nonexistent-model-xyz", "system", "user")
 
-    def test_compress_tool_calls_produces_transcript(self, opencode_setup):
-        from codemira.daemon import compress_tool_calls
+    def test_ollama_tool_compressor_produces_transcript(self, opencode_setup):
+        from codemira.extraction.compressor import ollama_tool_compressor
+        from codemira.extraction.transcript import iter_turns, render_transcript
         opencode_conn, _, _, _ = opencode_setup
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         old_ts = int((time.time() - 120) * 1000)
@@ -584,7 +585,8 @@ class TestOllamaCompression:
         )
         from codemira.opencode_db import read_session_conversation
         conversation = read_session_conversation(opencode_conn, "ses_comp_1")
-        result = compress_tool_calls(conversation, "gemma4:e2b", "http://localhost:11434", prompts_dir)
+        compressor = ollama_tool_compressor("gemma4:e2b", "http://localhost:11434", prompts_dir)
+        result = render_transcript(iter_turns(conversation), compressor)
         assert len(result.strip()) > 0
         assert "fastapi" in result.lower(), f"Compressed transcript should mention fastapi, got: {result!r}"
 
@@ -675,7 +677,8 @@ class TestOpenRouterExtraction:
 class TestFullOllamaPipeline:
     def test_compress_then_extract_stores_memories(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
-        from codemira.daemon import compress_tool_calls
+        from codemira.extraction.compressor import ollama_tool_compressor
+        from codemira.extraction.transcript import iter_turns, render_transcript
         from codemira.opencode_db import read_session_conversation
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         old_ts = int((time.time() - 120) * 1000)
@@ -698,7 +701,8 @@ class TestFullOllamaPipeline:
         conversation = read_session_conversation(opencode_conn, "ses_full_1")
         assert len(conversation) == 5, f"Expected 5 messages (2 user + 3 assistant), got {len(conversation)}"
         assert [m["role"] for m in conversation] == ["user", "assistant", "assistant", "user", "assistant"]
-        compressed = compress_tool_calls(conversation, "gemma4:e2b", "http://localhost:11434", prompts_dir)
+        compressor = ollama_tool_compressor("gemma4:e2b", "http://localhost:11434", prompts_dir)
+        compressed = render_transcript(iter_turns(conversation), compressor)
         assert len(compressed.strip()) > 0
         domain_terms = {"fastapi", "docker", "pytest"}
         found = {t for t in domain_terms if t in compressed.lower()}

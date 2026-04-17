@@ -121,7 +121,7 @@ Verify retrieval by hitting the daemon directly:
 ```bash
 curl -s -X POST http://localhost:9473/retrieve \
   -H "Content-Type: application/json" \
-  -d '{"query_expansion":"your query","entities":[],"pinned_memory_ids":[],"project_dir":"/path/to/project"}'
+  -d '{"query_expansion":"your query","entities":[],"pinned_memory_ids":[],"project_root":"/path/to/project"}'
 ```
 
 Health check:
