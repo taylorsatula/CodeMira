@@ -1,6 +1,6 @@
 import pytest
 
-from codemira.extraction.chunker import estimate_token_count, chunk_compressed_transcript, _split_into_turns
+from codemira.extraction.chunker import estimate_token_count, chunk_compressed_transcript, split_into_turns
 
 
 class TestEstimateTokenCount:
@@ -18,38 +18,38 @@ class TestEstimateTokenCount:
 
 class TestSplitIntoTurns:
     def test_single_user_message(self):
-        assert _split_into_turns("User: hello") == ["User: hello"]
+        assert split_into_turns("User: hello") == ["User: hello"]
 
     def test_user_assistant_pair(self):
         transcript = "User: hello\nAssistant: hi"
-        assert _split_into_turns(transcript) == ["User: hello\nAssistant: hi"]
+        assert split_into_turns(transcript) == ["User: hello\nAssistant: hi"]
 
     def test_user_with_tool_chain(self):
         transcript = "User: fix the bug\nAssistant: let me check\nTool: grep — found 3 matches\nAssistant: here's the fix\nTool: edit — updated file\nAssistant: done"
-        turns = _split_into_turns(transcript)
+        turns = split_into_turns(transcript)
         assert len(turns) == 1
         assert "Tool: grep" in turns[0]
         assert "Tool: edit" in turns[0]
 
     def test_two_turns_split_at_user_boundary(self):
         transcript = "User: hello\nAssistant: hi\nUser: now fix this\nAssistant: done"
-        turns = _split_into_turns(transcript)
+        turns = split_into_turns(transcript)
         assert len(turns) == 2
         assert turns[0] == "User: hello\nAssistant: hi"
         assert turns[1] == "User: now fix this\nAssistant: done"
 
     def test_tool_chain_stays_with_its_user(self):
         transcript = "User: check tests\nTool: pytest — 3 failures\nAssistant: fix coming\nUser: go ahead\nTool: edit — patched\nAssistant: done"
-        turns = _split_into_turns(transcript)
+        turns = split_into_turns(transcript)
         assert len(turns) == 2
         assert "Tool: pytest" in turns[0]
         assert "Tool: edit" in turns[1]
 
     def test_empty_transcript(self):
-        assert _split_into_turns("") == []
+        assert split_into_turns("") == []
 
     def test_whitespace_only(self):
-        assert _split_into_turns("  \n  \n  ") == []
+        assert split_into_turns("  \n  \n  ") == []
 
 
 class TestChunkCompressedTranscript:

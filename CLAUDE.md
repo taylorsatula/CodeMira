@@ -44,7 +44,7 @@ If you skip this, the maps rot and become misleading — worse than having no ma
 - **Know Thy Self**: I (Claude) have a tendency to invent endpoints or reinvent patterns rather than reading what's already there. Always look at existing code (especially `daemon/codemira/server.py`, `plugin/src/index.ts`, and `prompts/`) before proposing new structure.
 
 ### Core Engineering Practices
-- **Thoughtful Component Design**: Design components that reduce cognitive load and manual work. Handle complexity internally, expose simple APIs. `StoreManager.get(project_dir)` returns `(conn, index)` — callers don't open DBs, load schemas, or rebuild indexes. `HybridSearcher.hybrid_search()` takes a query + embedding + limits and returns ranked results — callers don't merge BM25 and ANN by hand.
+- **Thoughtful Component Design**: Design components that reduce cognitive load and manual work. Handle complexity internally, expose simple APIs. `StoreManager.get(project_root)` returns a `Store` dataclass (`conn`, `index`, `lock`) — callers don't open DBs, load schemas, or rebuild indexes. `HybridSearcher.hybrid_search()` takes a query + embedding + limits and returns ranked results — callers don't merge BM25 and ANN by hand.
 - **Integrate Rather Than Invent**: When stdlib or OpenCode's plugin API provides a mechanism, use it. `urllib.request` over a new HTTP dependency. OpenCode's `experimental.chat.messages.transform` mutation pattern over a sidecar queue.
 - **Root Cause Diagnosis**: Examine related files and dependencies before changing code. Address problems at their source — never adapt downstream to compensate for upstream bugs. (Example: when the plugin was querying a non-existent store, the fix was using `PluginInput.worktree` — not adding fallback paths to the daemon.)
 - **Simple Solutions First**: Consider simpler approaches before adding complexity. Implement exactly what is requested without unrequested fallbacks, retries, or error handling. Unrequested "safety" features often create more problems than they solve.
@@ -95,7 +95,7 @@ Extraction can fire on either of two triggers, both calling into `process_idle_s
 The `extraction_log` table prevents duplicate work: the `/extract` handler (`server.py:_extract_session`) calls `is_session_extracted()` first and no-ops if the session is already complete; the polling loop's `_collect_extracted_session_ids()` filter (`daemon.py:136`) likewise skips sessions the compaction path already processed. Compaction does NOT delete messages from OpenCode's SQLite — `MessageV2.filterCompactedEffect` filters them at read-time — so `read_session_conversation()` (`opencode_db.py:67`) sees the full pre-compaction transcript regardless of which trigger fires.
 
 ### Project Root Resolution
-The daemon keys per-project stores by `project.worktree` from OpenCode's SQLite. **The plugin must pass `PluginInput.worktree` to `/retrieve` — not `PluginInput.directory`.** `directory` is the session cwd and may be a subdirectory of the project root; using it points retrieval at a store the daemon never writes to. Any code path that touches project scoping must use `worktree`.
+The daemon keys per-project stores by `project.worktree` from OpenCode's SQLite. **The plugin must pass `PluginInput.worktree` to `/retrieve` (as the `project_root` field) — not `PluginInput.directory`.** `directory` is the session cwd and may be a subdirectory of the project root; using it points retrieval at a store the daemon never writes to. Any code path that touches project scoping must use `worktree` as the source value, surfaced everywhere downstream as `project_root`.
 
 ### Fail-Fast Bootstrap
 - Missing `OPENROUTER_API_KEY`: `launchd install` refuses to write the plist.
@@ -110,7 +110,7 @@ The daemon keys per-project stores by `project.worktree` from OpenCode's SQLite.
 The arc summarizer generates a structural decision topology of the conversation on demand. It is NOT part of the periodic extraction pipeline — it runs in the background when triggered by the plugin.
 
 - **On-demand generation**: The plugin fires `POST /arc/generate` (fire-and-forget, no await) when it detects a new user message. The daemon spawns a background thread that reads the full conversation from OpenCode's SQLite, formats it into a lightweight flat transcript (no Ollama compression pass), chunks it if it exceeds the model context window, and runs `call_ollama()` per chunk with frozen-prefix incremental chunking. The result is stored in the `arc_summaries` table in the project's `memories.db`.
-- **Arc retrieval**: The plugin fetches `GET /arc?session_id=...&project_dir=...` on each hook call. If no arc exists yet, `{topology: null}` is returned and the plugin omits the `<conversation_arc>` block.
+- **Arc retrieval**: The plugin fetches `GET /arc?session_id=...&project_root=...` on each hook call. If no arc exists yet, `{topology: null}` is returned and the plugin omits the `<conversation_arc>` block.
 - **Dedicated table**: `arc_summaries` (session_id PK, topology, message_count, generated_at) stores transient session state. Arcs are not embedded, not indexed, and do not participate in retrieval, hub discovery, or consolidation.
 - **No double-compression**: The arc summarizer formats the raw conversation directly (tool name + title/output[:500]) instead of running `compress_tool_calls()`. The arc model produces its own structural abstraction — pre-compressing adds Ollama round-trips with no benefit.
 - **Incremental chunking with frozen prefixes**: Chunks split at `User:` turn boundaries. Once a chunk's arc is generated, it is frozen and prepended verbatim to the next chunk as context. Old chunks are never re-processed. The final arc is the concatenation of all chunk arc fragments.
@@ -190,9 +190,9 @@ Config objects use `pydantic-settings.BaseSettings`. See `daemon/codemira/config
 # Critical Anti-Patterns to Avoid
 
 ## ❌ Plugin/Daemon Project Scoping Mismatch
-**Wrong**: Sending `input.directory` to `/retrieve`.
-**Right**: Sending `input.worktree`.
-**Why it matters**: The daemon keys stores by `project.worktree`. `directory` is the session cwd and may be a subdirectory. A mismatch means retrieval queries hit an empty store while the daemon writes to a different one.
+**Wrong**: Sending `input.directory` to `/retrieve` (or naming any local variable `project_dir`).
+**Right**: Sending `input.worktree` as the `project_root` field on the wire and in local variable names.
+**Why it matters**: The daemon keys stores by `project.worktree`. `directory` is the session cwd and may be a subdirectory. A mismatch means retrieval queries hit an empty store while the daemon writes to a different one. Naming everything downstream of the SQL alias `p.worktree AS project_root` consistently as `project_root` removes the chance of accidentally referring to the wrong concept.
 
 ## ❌ Consolidation With Stale Embeddings
 **Wrong**: Reusing `memories[0].embedding` as the embedding for the consolidated memory.

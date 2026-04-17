@@ -9,10 +9,10 @@ import {
   memoriesSection,
   recentActionsSection,
   renderHudItem,
-  triggerArcGeneration,
-  triggerExtraction,
-  fetchArcSummary,
+  renderPrompt,
+  daemonCall,
   type Memory,
+  type DaemonResult,
 } from "./pure.ts"
 
 function generateOpencodeId(prefix: "msg" | "prt"): string {
@@ -78,35 +78,6 @@ async function callOllama(
   return data.message?.content || ""
 }
 
-async function callDaemonRetrieve(
-  daemonUrl: string,
-  queryExpansion: string,
-  entities: string[],
-  pinnedMemoryIds: string[],
-  projectDir: string,
-): Promise<{ memories: Memory[]; degraded: boolean }> {
-  const response = await fetch(`${daemonUrl}/retrieve`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query_expansion: queryExpansion,
-      entities,
-      pinned_memory_ids: pinnedMemoryIds,
-      project_dir: projectDir,
-    }),
-  })
-  return (await response.json()) as { memories: Memory[]; degraded: boolean }
-}
-
-async function checkDaemonHealth(daemonUrl: string): Promise<boolean> {
-  try {
-    const response = await fetch(`${daemonUrl}/health`, { signal: AbortSignal.timeout(2000) })
-    return response.ok
-  } catch {
-    return false
-  }
-}
-
 const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = async (
   input,
   options,
@@ -123,15 +94,21 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
   const subcorticalSystemPrompt = readFileSync(join(promptsDir, "subcortical_system.txt"), "utf-8")
   const subcorticalUserTemplate = readFileSync(join(promptsDir, "subcortical_user.txt"), "utf-8")
 
+  function noteResult<T>(result: DaemonResult<T>): DaemonResult<T> {
+    if ("error" in result && (result.error === "down" || result.error === "timeout")) {
+      daemonUnavailable = true
+    } else if ("ok" in result) {
+      daemonUnavailable = false
+    }
+    return result
+  }
+
   return {
     "experimental.chat.messages.transform": async (_input, output) => {
       if (daemonUnavailable) {
         healthCheckCounter++
-        if (healthCheckCounter >= 10) {
-          healthCheckCounter = 0
-          daemonUnavailable = !(await checkDaemonHealth(config.daemonUrl))
-        }
-        if (daemonUnavailable) return
+        if (healthCheckCounter < 10) return
+        healthCheckCounter = 0
       }
 
       try {
@@ -141,6 +118,7 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
 
         const lastMsg = output.messages[output.messages.length - 1]
         const sessionID = lastMsg?.info?.sessionID || ""
+        const projectRoot = input.worktree
 
         if (sessionID !== lastSessionId) {
           lastSessionId = sessionID
@@ -149,12 +127,23 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
 
         if (userMessage && userMessage !== lastUserMessage) {
           lastUserMessage = userMessage
-          triggerArcGeneration(config.daemonUrl, sessionID, input.worktree)
+          daemonCall(
+            config.daemonUrl, "POST", "/arc/generate",
+            { session_id: sessionID, project_root: projectRoot },
+            { expect: "fire-forget" },
+          )
         }
 
-        const arcTopology = await fetchArcSummary(config.daemonUrl, sessionID, input.worktree)
-        if (arcTopology) {
-          cachedArc = arcTopology
+        const arcResult = noteResult(
+          await daemonCall<{ topology: string | null }>(
+            config.daemonUrl, "GET",
+            `/arc?session_id=${encodeURIComponent(sessionID)}&project_root=${encodeURIComponent(projectRoot)}`,
+            null,
+            { expect: "result" },
+          )
+        )
+        if ("ok" in arcResult && arcResult.ok.topology) {
+          cachedArc = arcResult.ok.topology
         }
 
         const recentActionsStr = recentActions
@@ -167,11 +156,12 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           .join("\n")
         const pinnedMemoriesStr = formatPinnedMemories(pinnedMemories, config.memoryTruncationWords)
 
-        const userPrompt = subcorticalUserTemplate
-          .replace("{user_message}", userMessage)
-          .replace("{recent_actions}", recentActionsStr)
-          .replace("{pinned_memories}", pinnedMemoriesStr)
-          .replace("{conversation_arc}", cachedArc || "None")
+        const userPrompt = renderPrompt(subcorticalUserTemplate, {
+          user_message: userMessage,
+          recent_actions: recentActionsStr,
+          pinned_memories: pinnedMemoriesStr,
+          conversation_arc: cachedArc || "None",
+        })
 
         const subcorticalResult = await callOllama(
           subcorticalSystemPrompt,
@@ -184,13 +174,20 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
 
         const pinnedIds = keep.length > 0 ? keep : pinnedMemories.map((m) => m.id)
 
-        const { memories } = await callDaemonRetrieve(
-          config.daemonUrl,
-          query_expansion,
-          entities,
-          pinnedIds,
-          input.worktree,
+        const retrieveResult = noteResult(
+          await daemonCall<{ memories: Memory[]; degraded: boolean }>(
+            config.daemonUrl, "POST", "/retrieve",
+            {
+              query_expansion,
+              entities,
+              pinned_memory_ids: pinnedIds,
+              project_root: projectRoot,
+            },
+            { expect: "result" },
+          )
         )
+        if ("error" in retrieveResult) return
+        const { memories } = retrieveResult.ok
 
         const hudText = formatHud(
           [
@@ -243,7 +240,11 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
       if (event?.type !== "session.compacted") return
       const sessionID = event.properties?.sessionID
       if (!sessionID) return
-      triggerExtraction(config.daemonUrl, sessionID, input.worktree)
+      daemonCall(
+        config.daemonUrl, "POST", "/extract",
+        { session_id: sessionID, project_root: input.worktree },
+        { expect: "fire-forget" },
+      )
     },
   }
 }

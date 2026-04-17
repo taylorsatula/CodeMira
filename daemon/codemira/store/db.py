@@ -2,6 +2,40 @@ import sqlite3
 import struct
 import uuid
 from datetime import datetime, timezone
+from typing import Iterable, TypeVar
+
+
+_T = TypeVar("_T")
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def dedupe_by(items: Iterable[_T], key: str = "id") -> list[_T]:
+    seen: set = set()
+    result: list[_T] = []
+    for item in items:
+        k = item[key]
+        if k in seen:
+            continue
+        seen.add(k)
+        result.append(item)
+    return result
+
+
+VALID_CATEGORIES: frozenset[str] = frozenset({
+    "decision_rationale",
+    "rejected_alternative",
+    "error_handling",
+    "dependency_philosophy",
+    "hidden_constraint",
+    "testing_convention",
+    "naming_convention",
+    "debugging_style",
+    "priority",
+    "vocabulary",
+})
 
 
 SCHEMA_SQL = """
@@ -109,8 +143,10 @@ def insert_memory(
     embedding: list[float],
     source_session_id: str | None = None,
 ) -> str:
+    if category not in VALID_CATEGORIES:
+        raise ValueError(f"Invalid category {category!r}; must be one of {sorted(VALID_CATEGORIES)}")
     memory_id = generate_memory_id()
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now()
     blob = embedding_to_blob(embedding)
     conn.execute(
         "INSERT INTO memories (id, text, category, embedding, source_session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -155,7 +191,7 @@ def update_memory(conn: sqlite3.Connection, memory_id: str, **kwargs) -> bool:
         updates[key] = value
     if not updates:
         return False
-    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updates["updated_at"] = _now()
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [memory_id]
     cursor = conn.execute(f"UPDATE memories SET {set_clause} WHERE id = ?", values)
@@ -172,12 +208,12 @@ def delete_memory(conn: sqlite3.Connection, memory_id: str) -> bool:
 
 
 def archive_memory(conn: sqlite3.Connection, memory_id: str) -> bool:
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now()
     return update_memory(conn, memory_id, is_archived=1, archived_at=now)
 
 
 def increment_access(conn: sqlite3.Connection, memory_ids: list[str]):
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now()
     for mid in memory_ids:
         conn.execute(
             "UPDATE memories SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?",
@@ -234,7 +270,7 @@ def insert_memory_link(
     link_type: str,
     reasoning: str | None = None,
 ):
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now()
     conn.execute(
         "INSERT OR IGNORE INTO memory_links (memory_id, linked_memory_id, link_type, reasoning, created_at) VALUES (?, ?, ?, ?, ?)",
         (memory_id, linked_memory_id, link_type, reasoning, now),
@@ -251,7 +287,7 @@ def get_linked_memories(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
 
 
 def log_extraction(conn: sqlite3.Connection, session_id: str, memory_count: int, is_complete: bool = True) -> int:
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now()
     complete_flag = 1 if is_complete else 0
     conn.execute(
         "INSERT INTO extraction_log (session_id, extracted_at, memory_count, attempt_count, is_complete) "
@@ -269,7 +305,7 @@ def log_extraction(conn: sqlite3.Connection, session_id: str, memory_count: int,
 
 
 def mark_extraction_complete(conn: sqlite3.Connection, session_id: str):
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now()
     conn.execute(
         "UPDATE extraction_log SET is_complete = 1, extracted_at = ? WHERE session_id = ?",
         (now, session_id),
@@ -288,7 +324,7 @@ def get_existing_memory_texts(conn: sqlite3.Connection) -> list[str]:
 
 
 def upsert_arc_fragment(conn: sqlite3.Connection, session_id: str, fragment_index: int, topology: str, content_hash: str, message_count: int):
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now()
     conn.execute(
         "INSERT INTO arc_fragments (session_id, fragment_index, topology, content_hash, message_count, generated_at) "
         "VALUES (?, ?, ?, ?, ?, ?) "

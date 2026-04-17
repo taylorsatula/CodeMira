@@ -32,7 +32,51 @@ from codemira.store.db import (
     get_arc_fragments,
     get_arc_summary,
     delete_arc_fragments_from,
+    VALID_CATEGORIES,
 )
+
+
+class TestHelpers:
+    def test_dedupe_by_id_preserves_order(self):
+        from codemira.store.db import dedupe_by
+        items = [{"id": 1, "v": "a"}, {"id": 1, "v": "b"}, {"id": 2, "v": "c"}]
+        result = dedupe_by(items)
+        assert result == [{"id": 1, "v": "a"}, {"id": 2, "v": "c"}]
+
+    def test_dedupe_by_custom_key(self):
+        from codemira.store.db import dedupe_by
+        items = [{"name": "a"}, {"name": "a"}, {"name": "b"}]
+        result = dedupe_by(items, key="name")
+        assert result == [{"name": "a"}, {"name": "b"}]
+
+    def test_now_returns_iso_with_utc_offset(self):
+        from codemira.store.db import _now
+        ts = _now()
+        assert "+00:00" in ts
+
+
+class TestCategoryValidation:
+    def test_invalid_category_raises(self, memory_db):
+        emb = _make_embedding()
+        with pytest.raises(ValueError, match="Invalid category"):
+            insert_memory(memory_db, "txt", "garbage_category", emb)
+
+    def test_empty_category_raises(self, memory_db):
+        emb = _make_embedding()
+        with pytest.raises(ValueError, match="Invalid category"):
+            insert_memory(memory_db, "txt", "", emb)
+
+    def test_all_valid_categories_accepted(self, memory_db):
+        emb = _make_embedding()
+        for cat in VALID_CATEGORIES:
+            insert_memory(memory_db, f"text for {cat}", cat, emb)
+
+    def test_valid_categories_set_is_complete(self):
+        assert VALID_CATEGORIES == frozenset({
+            "decision_rationale", "rejected_alternative", "error_handling",
+            "dependency_philosophy", "hidden_constraint", "testing_convention",
+            "naming_convention", "debugging_style", "priority", "vocabulary",
+        })
 
 
 @pytest.fixture

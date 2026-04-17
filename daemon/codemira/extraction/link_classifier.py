@@ -15,9 +15,8 @@ def classify_link(
     ollama_url: str,
     prompts_dir: str,
 ) -> str:
-    system_prompt = load_prompt("link_classification_system", prompts_dir)
-    user_template = load_prompt("link_classification_user", prompts_dir)
-    user_prompt = user_template.replace("{text_a}", text_a).replace("{text_b}", text_b)
+    system_prompt = load_prompt("link_classification_system", prompts_dir).render()
+    user_prompt = load_prompt("link_classification_user", prompts_dir).render(text_a=text_a, text_b=text_b)
     try:
         response = call_ollama(model, system_prompt, user_prompt, ollama_url)
     except Exception as e:

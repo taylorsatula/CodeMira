@@ -320,7 +320,8 @@ class TestDaemonStartup:
         from codemira.config import DaemonConfig
         from codemira.store.manager import StoreManager, project_store_paths
         manager = StoreManager(DaemonConfig())
-        conn, idx = manager.get(project_dir)
+        store = manager.get(project_dir)
+        conn, idx = store.conn, store.index
         _, db_path, _ = project_store_paths(project_dir)
         assert os.path.exists(db_path)
         assert os.path.getsize(db_path) > 0, "DB file should not be empty"
@@ -338,8 +339,8 @@ class TestDaemonStartup:
         os.makedirs(proj_a, exist_ok=True)
         os.makedirs(proj_b, exist_ok=True)
         manager = StoreManager(DaemonConfig())
-        conn_a, _ = manager.get(proj_a)
-        conn_b, _ = manager.get(proj_b)
+        conn_a = manager.get(proj_a).conn
+        conn_b = manager.get(proj_b).conn
         insert_memory(conn_a, "proj A memory", "priority", _make_embedding(seed=1))
         insert_memory(conn_b, "proj B memory", "priority", _make_embedding(seed=2))
         a_mems = [m["text"] for m in get_all_memories(conn_a)]
@@ -355,7 +356,8 @@ class TestDaemonStartup:
         from codemira.store.manager import StoreManager
         manager = StoreManager(DaemonConfig())
         config = DaemonConfig(http_port=0)
-        server = create_server(manager, config, port=0)
+        prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
+        server = create_server(manager, config, prompts_dir, port=0)
         port = server.server_address[1]
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
@@ -396,7 +398,7 @@ class TestExtractionToRetrievalPipeline:
             query_expansion="FastAPI REST API",
             entities=["fastapi"],
             pinned_memory_ids=[],
-            project_dir="/tmp",
+            project_root="/tmp",
             conn=memory_conn,
             index=mi,
             config=config,
@@ -429,7 +431,7 @@ class TestExtractionToRetrievalPipeline:
             query_expansion="FastAPI framework",
             entities=["fastapi"],
             pinned_memory_ids=[mid1],
-            project_dir="/tmp",
+            project_root="/tmp",
             conn=memory_conn,
             index=mi,
             config=config,
@@ -448,13 +450,16 @@ class TestExtractionToRetrievalPipeline:
         project_dir = os.path.join(tmpdir, "proj_http")
         os.makedirs(project_dir, exist_ok=True)
         manager = StoreManager(DaemonConfig())
-        conn, _ = manager.get(project_dir)
+        store = manager.get(project_dir)
+        conn = store.conn
         emb = _make_embedding(seed=42)
         mid = insert_memory(conn, "Prefers threading over asyncio", "priority", emb, "ses_int")
-        conn2, idx = manager.get(project_dir)
-        idx.rebuild_after_write(conn2)
+        store2 = manager.get(project_dir)
+        idx = store2.index
+        idx.rebuild_after_write(store2.conn)
         config = DaemonConfig(http_port=0)
-        server = create_server(manager, config, port=0)
+        prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
+        server = create_server(manager, config, prompts_dir, port=0)
         port = server.server_address[1]
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
@@ -464,7 +469,7 @@ class TestExtractionToRetrievalPipeline:
                 "query_expansion": "threading asyncio concurrency",
                 "entities": [],
                 "pinned_memory_ids": [],
-                "project_dir": project_dir,
+                "project_root": project_dir,
                 "query_embedding": emb,
             }).encode()
             req = urllib.request.Request(
@@ -494,9 +499,9 @@ class TestDedupDuringStore:
         index_path = os.path.join(tmpdir, "memories.index")
         mi = MemoryIndex(os.path.join(tmpdir, "memories.db"), index_path)
         mi.build_from_db(memory_conn)
-        assert is_duplicate_vector(emb, mi, 0.92) is True
+        assert is_duplicate_vector(emb, mi, 0.92) == "duplicate"
         different_emb = _make_embedding(seed=99)
-        assert is_duplicate_vector(different_emb, mi, 0.92) is False
+        assert is_duplicate_vector(different_emb, mi, 0.92) == "unique"
 
     def test_text_dedup_catches_near_duplicates(self):
         from codemira.extraction.dedup import is_duplicate_text

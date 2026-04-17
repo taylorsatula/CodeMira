@@ -2,7 +2,7 @@ import hashlib
 import logging
 import sqlite3
 
-from codemira.extraction.chunker import estimate_token_count, PROMPT_OVERHEAD_TOKENS, split_into_turns
+from codemira.extraction.chunker import estimate_token_count, PROMPT_OVERHEAD_TOKENS, split_into_turns, pack_turns_into_chunks
 from codemira.extraction.compressor import call_ollama
 from codemira.extraction.extractor import load_prompt
 from codemira.store.db import upsert_arc_fragment, get_arc_fragments, delete_arc_fragments_from
@@ -15,51 +15,26 @@ def _chunk_hash(content: str) -> str:
 
 
 def _format_raw_transcript(conversation: list[dict]) -> str:
-    parts = []
-    for msg in conversation:
-        if msg.get("role") == "user":
-            for part in msg.get("parts", []):
-                if part.get("type") == "text":
-                    parts.append(f"User: {part['text']}")
-        elif msg.get("role") == "assistant":
-            for part in msg.get("parts", []):
-                if part.get("type") == "text":
-                    parts.append(f"Assistant: {part['text']}")
-                elif part.get("type") == "tool":
-                    state = part.get("state", {})
-                    if state.get("status") == "completed":
-                        tool_name = part.get("tool", "unknown")
-                        title = state.get("title", "")
-                        output = state.get("output", "")[:500]
-                        display = title if title else output
-                        parts.append(f"Tool: {tool_name} — {display}")
-    return "\n\n".join(parts)
+    from codemira.extraction.transcript import iter_turns, render_transcript, TOOL_PREFIX
+
+    def _render_tool(part: dict) -> str | None:
+        state = part.get("state", {})
+        if state.get("status") != "completed":
+            return None
+        tool_name = part.get("tool", "unknown")
+        title = state.get("title", "")
+        output = state.get("output", "")[:500]
+        display = title if title else output
+        return f"{TOOL_PREFIX} {tool_name} — {display}"
+
+    return render_transcript(iter_turns(conversation), _render_tool)
 
 
 def _chunk_transcript(transcript: str, context_length: int, chunk_target_tokens: int) -> list[str]:
     prior_arc_estimate = 1024
     chunk_budget = max(chunk_target_tokens, int(0.7 * context_length)) - PROMPT_OVERHEAD_TOKENS - prior_arc_estimate
     chunk_budget = max(chunk_budget, 1024)
-    if estimate_token_count(transcript) <= chunk_budget:
-        return [transcript]
-    turns = split_into_turns(transcript)
-    chunks: list[str] = []
-    current_turns: list[str] = []
-    current_tokens = 0
-    for turn in turns:
-        turn_tokens = estimate_token_count(turn)
-        if current_turns and current_tokens + turn_tokens > chunk_budget:
-            chunks.append("\n\n".join(current_turns))
-            current_turns = [turn]
-            current_tokens = turn_tokens
-        else:
-            current_turns.append(turn)
-            current_tokens += turn_tokens
-    if current_turns:
-        chunks.append("\n\n".join(current_turns))
-    if not chunks:
-        return [transcript]
-    return chunks
+    return pack_turns_into_chunks(transcript, chunk_budget)
 
 
 def generate_arc_summary(
@@ -78,7 +53,7 @@ def generate_arc_summary(
         return None
     transcript = _format_raw_transcript(conversation)
     chunks = _chunk_transcript(transcript, context_length, chunk_target_tokens)
-    system_prompt = load_prompt("arc_summarizer_system", prompts_dir)
+    system_prompt = load_prompt("arc_summarizer_system", prompts_dir).render()
     arc_user_template = load_prompt("arc_summarizer_user", prompts_dir)
 
     existing_fragments = get_arc_fragments(memory_conn, session_id)
@@ -110,8 +85,7 @@ def generate_arc_summary(
 
     # Process dirty and new chunks.
     for i in range(first_dirty, len(chunks)):
-        user_prompt = arc_user_template.replace("{transcript}", chunks[i])
-        user_prompt = user_prompt.replace("{prior_arc}", prior_arc)
+        user_prompt = arc_user_template.render(transcript=chunks[i], prior_arc=prior_arc)
         try:
             fragment = call_ollama(model, system_prompt, user_prompt, ollama_url)
         except Exception as e:

@@ -7,9 +7,8 @@ import {
   memoriesSection,
   recentActionsSection,
   renderHudItem,
-  triggerArcGeneration,
-  triggerExtraction,
-  fetchArcSummary,
+  renderPrompt,
+  daemonCall,
   type Memory,
   type RecentAction,
 } from "../src/pure.ts"
@@ -405,34 +404,49 @@ describe("formatHud", () => {
   })
 })
 
-describe("triggerArcGeneration", () => {
-  test("fires POST without throwing", () => {
-    triggerArcGeneration("http://localhost:1", "ses_123", "/tmp/proj")
+describe("renderPrompt", () => {
+  test("substitutes named slots", () => {
+    expect(renderPrompt("hello {name}", { name: "world" })).toBe("hello world")
   })
 
-  test("does not throw on connection refused", () => {
-    triggerArcGeneration("http://localhost:1", "ses_123", "/tmp/proj")
+  test("substitutes multiple slots", () => {
+    expect(renderPrompt("{a} and {b}", { a: "x", b: "y" })).toBe("x and y")
+  })
+
+  test("throws on missing slot", () => {
+    expect(() => renderPrompt("hello {name}", {})).toThrow("Missing prompt slots")
+  })
+
+  test("throws on unknown slot", () => {
+    expect(() => renderPrompt("hello {name}", { name: "x", extra: "y" })).toThrow("Unknown prompt slots")
+  })
+
+  test("ignores JSON-style braces that are not slots", () => {
+    const tmpl = 'output {"decision":"squash"} ok'
+    expect(renderPrompt(tmpl, {})).toBe(tmpl)
+  })
+
+  test("repeated slot replaced everywhere", () => {
+    expect(renderPrompt("{x}-{x}", { x: "z" })).toBe("z-z")
   })
 })
 
-describe("triggerExtraction", () => {
-  test("fires POST without throwing", () => {
-    triggerExtraction("http://localhost:1", "ses_123", "/tmp/proj")
+describe("daemonCall", () => {
+  test("fire-forget returns immediately without throwing", async () => {
+    const result = await daemonCall("http://localhost:1", "POST", "/x", { a: 1 }, { expect: "fire-forget" })
+    expect("ok" in result).toBe(true)
   })
 
-  test("does not throw on connection refused", () => {
-    triggerExtraction("http://localhost:1", "ses_123", "/tmp/proj")
-  })
-})
-
-describe("fetchArcSummary", () => {
-  test("returns null on connection refused", async () => {
-    const result = await fetchArcSummary("http://localhost:1", "ses_123", "/tmp/proj")
-    expect(result).toBeNull()
+  test("returns error on connection refused", async () => {
+    const result = await daemonCall("http://localhost:1", "POST", "/x", { a: 1 }, { expect: "result" })
+    expect("error" in result).toBe(true)
+    if ("error" in result) {
+      expect(["down", "timeout", "bad_response"]).toContain(result.error)
+    }
   })
 
-  test("returns null on non-200 response", async () => {
-    const result = await fetchArcSummary("http://localhost:1", "ses_123", "/tmp/proj")
-    expect(result).toBeNull()
+  test("respects timeout option", async () => {
+    const result = await daemonCall("http://localhost:1", "GET", "/x", null, { expect: "result", timeout: 100 })
+    expect("error" in result).toBe(true)
   })
 })

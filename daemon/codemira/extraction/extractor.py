@@ -1,10 +1,35 @@
 import json
+import logging
+import re
 import urllib.request
 import os
 
 from codemira.errors import ExtractionError
-from codemira.store.db import get_existing_memory_texts
+from codemira.store.db import get_existing_memory_texts, VALID_CATEGORIES
 from codemira.extraction.dedup import is_duplicate_text
+
+
+log = logging.getLogger(__name__)
+
+
+class PromptTemplate:
+    _SLOT_RE = re.compile(r"\{(\w+)\}")
+
+    def __init__(self, text: str):
+        self.text = text
+        self._slots = set(self._SLOT_RE.findall(text))
+
+    def render(self, **kwargs: str) -> str:
+        missing = self._slots - kwargs.keys()
+        if missing:
+            raise ValueError(f"Missing prompt slots: {sorted(missing)}")
+        extra = kwargs.keys() - self._slots
+        if extra:
+            raise ValueError(f"Unknown prompt slots: {sorted(extra)}")
+        out = self.text
+        for k, v in kwargs.items():
+            out = out.replace(f"{{{k}}}", v)
+        return out
 
 
 def call_api_model(model: str, system: str, user: str, api_key: str) -> str:
@@ -31,12 +56,12 @@ def call_api_model(model: str, system: str, user: str, api_key: str) -> str:
         raise ExtractionError(f"OpenRouter response missing expected structure: {e}") from e
 
 
-def load_prompt(name: str, prompts_dir: str | None = None) -> str:
+def load_prompt(name: str, prompts_dir: str | None = None) -> PromptTemplate:
     if prompts_dir is None:
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "prompts")
     path = os.path.join(prompts_dir, f"{name}.txt")
     with open(path) as f:
-        return f.read()
+        return PromptTemplate(f.read())
 
 
 def _build_existing_memories_str(existing_texts: list[str], prior_chunk_texts: list[str] | None) -> tuple[str, list[str]]:
@@ -63,18 +88,19 @@ def extract_memories(
     prompts_dir: str | None = None,
     prior_chunk_texts: list[str] | None = None,
 ) -> list[dict]:
-    system_prompt = load_prompt("extraction_system", prompts_dir)
-    
+    system_template = load_prompt("extraction_system", prompts_dir)
+
     from codemira.store.db import get_arc_summary
     arc_data = get_arc_summary(conn, session_id)
     conversation_arc = arc_data["topology"] if arc_data else "No arc available"
-    system_prompt = system_prompt.replace("{conversation_arc}", conversation_arc)
-    
+    system_prompt = system_template.render(conversation_arc=conversation_arc)
+
     existing_texts = get_existing_memory_texts(conn)
     existing_str, combined_texts = _build_existing_memories_str(existing_texts, prior_chunk_texts)
-    user_prompt = load_prompt("extraction_user", prompts_dir)
-    user_prompt = user_prompt.replace("{compressed_transcript}", compressed_transcript)
-    user_prompt = user_prompt.replace("{existing_memories}", existing_str)
+    user_prompt = load_prompt("extraction_user", prompts_dir).render(
+        compressed_transcript=compressed_transcript,
+        existing_memories=existing_str,
+    )
     response_text = call_api_model(extraction_model, system_prompt, user_prompt, api_key)
     try:
         memories = json.loads(response_text)
@@ -93,6 +119,10 @@ def extract_memories(
     deduped = []
     for m in memories:
         if not isinstance(m, dict) or "text" not in m:
+            continue
+        category = m.get("category")
+        if category not in VALID_CATEGORIES:
+            log.warning("Skipping memory with invalid category %r: %r", category, m["text"][:80])
             continue
         if is_duplicate_text(m["text"], combined_texts, deduplicate_text_threshold):
             continue

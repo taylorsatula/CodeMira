@@ -10,6 +10,54 @@ export interface RecentAction {
   result: string
 }
 
+export interface SessionContext {
+  sessionId: string
+  projectRoot: string
+}
+
+export type DaemonError = "timeout" | "down" | "bad_response" | "not_found"
+export type DaemonResult<T> = { ok: T } | { error: DaemonError }
+
+const DEFAULT_TIMEOUT_MS = 2000
+
+export async function daemonCall<T = undefined>(
+  daemonUrl: string,
+  method: "GET" | "POST",
+  path: string,
+  body: object | null,
+  options: { expect: "result" | "ack" | "fire-forget"; timeout?: number },
+): Promise<DaemonResult<T>> {
+  const url = `${daemonUrl}${path}`
+  const headers: Record<string, string> = body ? { "Content-Type": "application/json" } : {}
+  const init: RequestInit = {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  }
+
+  if (options.expect === "fire-forget") {
+    fetch(url, init).catch(() => {})
+    return { ok: undefined as T }
+  }
+
+  init.signal = AbortSignal.timeout(options.timeout ?? DEFAULT_TIMEOUT_MS)
+
+  try {
+    const resp = await fetch(url, init)
+    if (resp.status === 404) return { error: "not_found" }
+    if (!resp.ok) return { error: "bad_response" }
+    if (options.expect === "ack") return { ok: undefined as T }
+    const data = (await resp.json()) as T
+    return { ok: data }
+  } catch (e: any) {
+    if (e?.name === "TimeoutError" || e?.name === "AbortError") return { error: "timeout" }
+    if (e?.cause?.code === "ECONNREFUSED" || /fetch failed/.test(e?.message ?? "")) {
+      return { error: "down" }
+    }
+    return { error: "bad_response" }
+  }
+}
+
 export function extractCurrentTurnContext(
   messages: { info: any; parts: any[] }[],
   toolWindow: number,
@@ -61,6 +109,22 @@ function formatMemoryLine(m: Memory, truncWords: number): string {
 export function formatPinnedMemories(memories: Memory[], truncWords: number): string {
   if (memories.length === 0) return "None"
   return memories.map((m) => formatMemoryLine(m, truncWords)).join("\n")
+}
+
+export function renderPrompt(template: string, slots: Record<string, string>): string {
+  const expected = new Set<string>()
+  for (const m of template.matchAll(/\{(\w+)\}/g)) {
+    expected.add(m[1])
+  }
+  const missing = [...expected].filter((s) => !(s in slots))
+  if (missing.length > 0) throw new Error(`Missing prompt slots: ${missing.sort().join(",")}`)
+  const extra = Object.keys(slots).filter((k) => !expected.has(k))
+  if (extra.length > 0) throw new Error(`Unknown prompt slots: ${extra.sort().join(",")}`)
+  let out = template
+  for (const [k, v] of Object.entries(slots)) {
+    out = out.split(`{${k}}`).join(v)
+  }
+  return out
 }
 
 export function parseSubcorticalXml(xml: string): {
@@ -162,44 +226,4 @@ export function formatHud(
     console.log("[codemira:loud] HUD:\n" + hud)
   }
   return hud
-}
-
-export function triggerArcGeneration(
-  daemonUrl: string,
-  sessionId: string,
-  projectDir: string,
-): void {
-  fetch(`${daemonUrl}/arc/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, project_dir: projectDir }),
-  }).catch(() => {})
-}
-
-export function triggerExtraction(
-  daemonUrl: string,
-  sessionId: string,
-  projectDir: string,
-): void {
-  fetch(`${daemonUrl}/extract`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, project_dir: projectDir }),
-  }).catch(() => {})
-}
-
-export async function fetchArcSummary(
-  daemonUrl: string,
-  sessionId: string,
-  projectDir: string,
-): Promise<string | null> {
-  try {
-    const url = `${daemonUrl}/arc?session_id=${encodeURIComponent(sessionId)}&project_dir=${encodeURIComponent(projectDir)}`
-    const response = await fetch(url, { signal: AbortSignal.timeout(2000) })
-    if (!response.ok) return null
-    const data = (await response.json()) as { topology: string | null }
-    return data.topology
-  } catch {
-    return null
-  }
 }

@@ -19,7 +19,8 @@ def server_setup(tmpdir_path):
     os.makedirs(project_dir, exist_ok=True)
     config = DaemonConfig(http_port=0)
     manager = StoreManager(config)
-    conn, mi = manager.get(project_dir)
+    store = manager.get(project_dir)
+    conn, mi = store.conn, store.index
     embs = _make_embeddings(3)
     ids = []
     texts = [
@@ -31,7 +32,8 @@ def server_setup(tmpdir_path):
         mid = insert_memory(conn, text, "priority", emb)
         ids.append(mid)
     mi.rebuild_after_write(conn)
-    server = create_server(manager, config, port=0)
+    prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
+    server = create_server(manager, config, prompts_dir, port=0)
     port = server.server_address[1]
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
@@ -57,7 +59,7 @@ class TestRetrieveEndpoint:
             "query_expansion": "threading asyncio",
             "entities": [],
             "pinned_memory_ids": [],
-            "project_dir": project_dir,
+            "project_root": project_dir,
             "query_embedding": embs[0],
         }).encode()
         req = urllib.request.Request(f"{base_url}/retrieve", data=payload,
@@ -75,7 +77,7 @@ class TestRetrieveEndpoint:
             "query_expansion": "sqlite3 ORM",
             "entities": [],
             "pinned_memory_ids": [ids[0]],
-            "project_dir": project_dir,
+            "project_root": project_dir,
             "query_embedding": embs[2],
         }).encode()
         req = urllib.request.Request(f"{base_url}/retrieve", data=payload,
@@ -101,7 +103,7 @@ class TestRetrieveEndpoint:
             "query_expansion": "docker deployment",
             "entities": ["docker"],
             "pinned_memory_ids": [],
-            "project_dir": project_dir,
+            "project_root": project_dir,
             "query_embedding": embs[1],
         }).encode()
         req = urllib.request.Request(f"{base_url}/retrieve", data=payload,
@@ -127,7 +129,7 @@ class TestNotFoundEndpoint:
 class TestArcGetEndpoint:
     def test_arc_returns_null_when_no_arc(self, server_setup):
         base_url, conn, mi, ids, embs, config, project_dir = server_setup
-        resp = urllib.request.urlopen(f"{base_url}/arc?session_id=ses_none&project_dir={urllib.parse.quote(project_dir)}")
+        resp = urllib.request.urlopen(f"{base_url}/arc?session_id=ses_none&project_root={urllib.parse.quote(project_dir)}")
         data = json.loads(resp.read())
         assert data["topology"] is None
         assert data["session_id"] == "ses_none"
@@ -136,7 +138,7 @@ class TestArcGetEndpoint:
         base_url, conn, mi, ids, embs, config, project_dir = server_setup
         from codemira.store.db import upsert_arc_fragment
         upsert_arc_fragment(conn, "ses_test", 0, "[START] Goal: Fix bug\n └─ [CURRENT] Done", "hash1", 10)
-        resp = urllib.request.urlopen(f"{base_url}/arc?session_id=ses_test&project_dir={urllib.parse.quote(project_dir)}")
+        resp = urllib.request.urlopen(f"{base_url}/arc?session_id=ses_test&project_root={urllib.parse.quote(project_dir)}")
         data = json.loads(resp.read())
         assert data["topology"] == "[START] Goal: Fix bug\n └─ [CURRENT] Done"
         assert data["session_id"] == "ses_test"
@@ -155,7 +157,7 @@ class TestArcGenerateEndpoint:
         base_url, conn, mi, ids, embs, config, project_dir = server_setup
         payload = json.dumps({
             "session_id": "ses_gen",
-            "project_dir": project_dir,
+            "project_root": project_dir,
         }).encode()
         req = urllib.request.Request(f"{base_url}/arc/generate", data=payload,
                                       headers={"Content-Type": "application/json"})
@@ -181,7 +183,7 @@ class TestExtractEndpoint:
         base_url, conn, mi, ids, embs, config, project_dir = server_setup
         payload = json.dumps({
             "session_id": "ses_extract",
-            "project_dir": project_dir,
+            "project_root": project_dir,
         }).encode()
         req = urllib.request.Request(f"{base_url}/extract", data=payload,
                                       headers={"Content-Type": "application/json"})
@@ -217,7 +219,7 @@ class TestExtractEndpoint:
         log_extraction(conn, "ses_done", memory_count=3, is_complete=True)
         payload = json.dumps({
             "session_id": "ses_done",
-            "project_dir": project_dir,
+            "project_root": project_dir,
         }).encode()
         req = urllib.request.Request(f"{base_url}/extract", data=payload,
                                       headers={"Content-Type": "application/json"})

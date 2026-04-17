@@ -28,9 +28,8 @@ def consolidate_cluster(
         return None
     texts = [m["text"] for m in memories]
     memory_texts = "\n".join(f"- {t}" for t in texts)
-    system_prompt = load_prompt("consolidation_system", prompts_dir)
-    user_template = load_prompt("consolidation_user", prompts_dir)
-    user_prompt = user_template.replace("{memory_texts}", memory_texts)
+    system_prompt = load_prompt("consolidation_system", prompts_dir).render()
+    user_prompt = load_prompt("consolidation_user", prompts_dir).render(memory_texts=memory_texts)
     try:
         result = call_ollama(model, system_prompt, user_prompt, ollama_url)
     except Exception:

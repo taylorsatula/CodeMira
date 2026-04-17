@@ -1,4 +1,4 @@
-from codemira.summarization.handler import _format_raw_transcript, _split_into_turns, _chunk_transcript
+from codemira.summarization.handler import _format_raw_transcript, split_into_turns, _chunk_transcript
 
 
 class TestFormatRawTranscript:
@@ -41,18 +41,18 @@ class TestFormatRawTranscript:
 
 class TestSplitIntoTurns:
     def test_single_turn(self):
-        assert _split_into_turns("User: hello\nAssistant: hi") == ["User: hello\nAssistant: hi"]
+        assert split_into_turns("User: hello\nAssistant: hi") == ["User: hello\nAssistant: hi"]
 
     def test_two_turns(self):
         transcript = "User: hello\nAssistant: hi\nUser: fix it\nAssistant: done"
-        turns = _split_into_turns(transcript)
+        turns = split_into_turns(transcript)
         assert len(turns) == 2
 
     def test_empty(self):
-        assert _split_into_turns("") == []
+        assert split_into_turns("") == []
 
     def test_whitespace_only(self):
-        assert _split_into_turns("  \n  ") == []
+        assert split_into_turns("  \n  ") == []
 
 
 class TestChunkTranscript:

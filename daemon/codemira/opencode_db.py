@@ -35,6 +35,22 @@ def open_opencode_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+class OpenCodeConnection:
+    def __init__(self, db_path_override: str | None = None):
+        self._override = db_path_override
+        self.conn: sqlite3.Connection | None = None
+
+    def __enter__(self) -> sqlite3.Connection:
+        path = discover_opencode_db(self._override)
+        self.conn = open_opencode_db(path)
+        return self.conn
+
+    def __exit__(self, *args):
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+
+
 def _is_valid_worktree(path: str | None) -> bool:
     return bool(path) and os.path.abspath(path) != os.sep
 
