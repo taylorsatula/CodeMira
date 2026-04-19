@@ -1,0 +1,37 @@
+  Six-Axis Code Change Rubric
+
+  1. Correctness — Does it actually work?
+  - Produces the intended behavior for stated inputs
+  - Handles edge cases and boundary conditions
+  - Doesn't regress existing behavior
+  - The bar: could you explain why it's correct, not just that it passes tests?
+
+  2. Necessity — Should this change exist?
+  - Solves a real, current problem (not speculative)
+  - Minimal — no "while I'm here" extras bolted on
+  - Nothing added "just in case" or "for flexibility"
+  - The bar: can you delete any part of this diff without losing the stated goal?
+
+  3. Clarity — Can a stranger understand it?
+  - Readable without the PR description as a crutch
+  - Names match what things are and do
+  - Structure makes the logic self-evident
+  - The bar: will the next person who touches this need to ask the author what it does?
+
+  4. Fit — Does it belong in this codebase?
+  - Follows existing conventions and patterns (or explicitly replaces them)
+  - Scope is appropriate — touches only what it needs to
+  - Abstraction level matches its neighbors
+  - The bar: does this look like it was written by someone who read the surrounding code?
+
+  5. Cost — What's the ongoing price tag?
+  - Maintenance burden introduced (new code paths, new config, new abstractions)
+  - Cognitive load — how much context must a reader hold to understand it
+  - Coupling — new dependencies between components that were previously independent
+  - The bar: is the maintenance cost proportional to the value delivered?
+
+  6. Safety — What happens when things go wrong?
+  - No security vulnerabilities introduced (injection, auth bypass, data exposure)
+  - Failure modes are loud, not silent — broken infra shouldn't look like empty data
+  - Reversible — if this is wrong, the blast radius is contained
+  - The bar: when (not if) this breaks, will the operator know immediately and know where to look?
