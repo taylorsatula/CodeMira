@@ -1,7 +1,7 @@
 import json
 import logging
-import os
 import threading
+import urllib.error
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -61,7 +61,7 @@ class RetrieveHandler(BaseHTTPRequestHandler):
     def _handle_health(self) -> dict:
         return {
             "status": "ok",
-            "ollama": self._check_ollama(),
+            "llm": self._check_llm(),
             "embedding_model": self._check_embedding_model(),
             "version": "0.1.0",
         }
@@ -129,7 +129,6 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                     store=store,
                     opencode_conn=opencode_conn,
                     prompts_dir=self.prompts_dir,
-                    api_key=os.environ["OPENROUTER_API_KEY"],
                 )
                 extract_session_memories(session_id, project_root, ctx, self.config)
         except Exception as e:
@@ -147,7 +146,8 @@ class RetrieveHandler(BaseHTTPRequestHandler):
                         opencode_conn=opencode_conn,
                         memory_conn=store.conn,
                         model=self.config.arc_model,
-                        ollama_url=self.config.ollama_url,
+                        base_url=self.config.arc_base_url,
+                        api_key=self.config.arc_api_key,
                         prompts_dir=self.prompts_dir,
                         context_length=self.config.arc_model_context_length,
                         chunk_target_tokens=self.config.arc_chunk_target_tokens,
@@ -184,9 +184,13 @@ class RetrieveHandler(BaseHTTPRequestHandler):
     def _run_in_background(self, target, *args):
         threading.Thread(target=target, args=args, daemon=True).start()
 
-    def _check_ollama(self) -> bool:
+    def _check_llm(self) -> bool:
+        base_url = self.config.subcortical_base_url.rstrip("/")
         try:
-            urllib.request.urlopen(f"{self.config.ollama_url}/api/tags", timeout=2)
+            urllib.request.urlopen(f"{base_url}/models", timeout=2)
+            return True
+        except urllib.error.HTTPError:
+            # Service responded with an HTTP status (e.g. 401, 404) — endpoint is up.
             return True
         except Exception:
             return False

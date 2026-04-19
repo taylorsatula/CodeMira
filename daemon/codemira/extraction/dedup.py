@@ -4,7 +4,7 @@ from typing import Literal
 
 from rapidfuzz import fuzz
 
-from codemira.extraction.compressor import call_ollama
+from codemira.llm import call_llm
 from codemira.store.index import MemoryIndex
 
 
@@ -18,14 +18,15 @@ VALID_ENTITY_TYPES = {"library", "framework", "tool", "pattern", "protocol", "er
 def extract_entities(
     text: str,
     model: str,
-    ollama_url: str,
+    base_url: str,
+    api_key: str,
     prompts_dir: str,
 ) -> list[dict]:
     from codemira.extraction.extractor import load_prompt
     system_prompt = load_prompt("entity_extraction_system", prompts_dir).render()
     user_prompt = load_prompt("entity_extraction_user", prompts_dir).render(text=text)
     try:
-        response = call_ollama(model, system_prompt, user_prompt, ollama_url)
+        response = call_llm(model, system_prompt, user_prompt, base_url, api_key)
     except Exception as e:
         log.warning("Entity extraction call failed (%s); returning no entities", e)
         return []

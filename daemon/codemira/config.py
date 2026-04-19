@@ -12,11 +12,17 @@ class DaemonConfig(BaseSettings):
     embedding_dimension: int = 768
     # Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
     subcortical_model: str = "gemma4:e2b"
+    subcortical_base_url: str = "http://localhost:11434/v1"
+    subcortical_api_key: str = ""
     extraction_model: str = "z-ai/glm-5.1"
+    extraction_base_url: str = "https://openrouter.ai/api/v1"
+    extraction_api_key: str = ""
     extraction_model_context_length: int = 128000
     extraction_chunk_target_tokens: int = 75_000
     consolidation_interval_hours: int = 24
     consolidation_model: str = "gemma4:e4b"
+    consolidation_base_url: str = "http://localhost:11434/v1"
+    consolidation_api_key: str = ""
     consolidation_similarity_threshold: float = 0.85
     link_similarity_threshold: float = 0.75
     deduplicate_text_threshold: float = 0.95
@@ -24,11 +30,12 @@ class DaemonConfig(BaseSettings):
     hnsw_ef_construction: int = 200
     hnsw_m: int = 16
     hnsw_ef_search: int = 50
-    ollama_url: str = "http://localhost:11434"
     max_extraction_attempts: int = 3
     opencode_db_path: str | None = None
     # Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
     arc_model: str = "gemma4:e2b"
+    arc_base_url: str = "http://localhost:11434/v1"
+    arc_api_key: str = ""
     arc_model_context_length: int = 128000
     arc_chunk_target_tokens: int = 30_000
     loud: bool = False

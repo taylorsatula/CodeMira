@@ -2,13 +2,14 @@ import os
 
 import pytest
 
-from tests.conftest import skip_no_ollama
+from tests.conftest import skip_no_local_llm
 from codemira.extraction.dedup import is_duplicate_text, extract_entities, VALID_ENTITY_TYPES
 from codemira.extraction.extractor import _build_existing_memories_str
 
 
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
-OLLAMA_URL = "http://localhost:11434"
+LOCAL_BASE_URL = "http://localhost:11434/v1"
+LOCAL_API_KEY = ""
 ENTITY_MODEL = "gemma4:e2b"
 
 
@@ -42,12 +43,12 @@ class TestDedupText:
         assert is_duplicate_text("Some text", [], 0.95) is False
 
 
-@skip_no_ollama
+@skip_no_local_llm
 class TestExtractEntities:
     def test_extracts_framework(self):
         entities = extract_entities(
             "Uses FastAPI for REST endpoints",
-            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+            ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, PROMPTS_DIR,
         )
         names = {e["name"] for e in entities}
         assert "fastapi" in names, f"Expected fastapi in {names}"
@@ -55,7 +56,7 @@ class TestExtractEntities:
     def test_extracts_multiple(self):
         entities = extract_entities(
             "Uses FastAPI with pytest and Docker",
-            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+            ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, PROMPTS_DIR,
         )
         names = {e["name"] for e in entities}
         assert names & {"fastapi", "pytest", "docker"}, f"Expected at least one of fastapi/pytest/docker in {names}"
@@ -63,14 +64,14 @@ class TestExtractEntities:
     def test_no_entities_for_generic_text(self):
         entities = extract_entities(
             "Prefers simple solutions over clever abstractions",
-            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+            ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, PROMPTS_DIR,
         )
         assert isinstance(entities, list)
 
     def test_entity_shape(self):
         entities = extract_entities(
             "Uses pytest for testing",
-            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+            ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, PROMPTS_DIR,
         )
         for e in entities:
             assert "name" in e and isinstance(e["name"], str)
@@ -80,7 +81,7 @@ class TestExtractEntities:
     def test_deduplicates(self):
         entities = extract_entities(
             "pytest is great. Also pytest again.",
-            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+            ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, PROMPTS_DIR,
         )
         names = [e["name"] for e in entities]
         assert len(names) == len(set(names)), f"Expected unique names, got {names}"
@@ -88,7 +89,7 @@ class TestExtractEntities:
     def test_extracts_project_concept(self):
         entities = extract_entities(
             "The PeanutGallery is a two-stage metacognitive observer that watches MIRA's conversations",
-            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+            ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, PROMPTS_DIR,
         )
         names = {e["name"] for e in entities}
         types = {e["type"] for e in entities}
@@ -98,7 +99,7 @@ class TestExtractEntities:
     def test_project_concept_type_preserved(self):
         entities = extract_entities(
             "The DomainDocs subsystem generates project documentation",
-            ENTITY_MODEL, OLLAMA_URL, PROMPTS_DIR,
+            ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, PROMPTS_DIR,
         )
         domaindocs = next((e for e in entities if e["name"] == "domaindocs"), None)
         if domaindocs is not None:

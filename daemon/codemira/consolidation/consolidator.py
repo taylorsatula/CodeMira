@@ -4,7 +4,7 @@ import sqlite3
 
 from codemira.store.db import archive_memory, insert_memory, get_or_create_entity, link_memory_entity, get_entities_for_memory
 from codemira.store.index import MemoryIndex
-from codemira.extraction.compressor import call_ollama
+from codemira.llm import call_llm
 from codemira.extraction.extractor import load_prompt
 
 log = logging.getLogger(__name__)
@@ -15,8 +15,9 @@ def consolidate_cluster(
     conn: sqlite3.Connection,
     index: MemoryIndex,
     model: str,
-    ollama_url: str = "http://localhost:11434",
-    prompts_dir: str | None = None,
+    base_url: str,
+    api_key: str,
+    prompts_dir: str,
 ) -> str | None:
     from codemira.store.db import get_memory
     memories = []
@@ -31,7 +32,7 @@ def consolidate_cluster(
     system_prompt = load_prompt("consolidation_system", prompts_dir).render()
     user_prompt = load_prompt("consolidation_user", prompts_dir).render(memory_texts=memory_texts)
     try:
-        result = call_ollama(model, system_prompt, user_prompt, ollama_url)
+        result = call_llm(model, system_prompt, user_prompt, base_url, api_key)
     except Exception:
         return None
     try:
@@ -70,15 +71,16 @@ def run_consolidation(
     conn: sqlite3.Connection,
     index: MemoryIndex,
     model: str,
-    similarity_threshold: float = 0.85,
-    ollama_url: str = "http://localhost:11434",
-    prompts_dir: str | None = None,
+    similarity_threshold: float,
+    base_url: str,
+    api_key: str,
+    prompts_dir: str,
 ) -> list[str]:
     from codemira.consolidation.cluster import find_clusters
     clusters = find_clusters(conn, index, similarity_threshold)
     new_ids = []
     for cluster in clusters:
-        new_mid = consolidate_cluster(cluster, conn, index, model, ollama_url, prompts_dir)
+        new_mid = consolidate_cluster(cluster, conn, index, model, base_url, api_key, prompts_dir)
         if new_mid:
             new_ids.append(new_mid)
     if new_ids:

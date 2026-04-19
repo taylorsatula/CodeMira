@@ -1,10 +1,10 @@
 import json
 import logging
 import re
-import urllib.request
 import os
 
 from codemira.errors import ExtractionError
+from codemira.llm import call_llm
 from codemira.store.db import get_existing_memory_texts, VALID_CATEGORIES
 from codemira.extraction.dedup import is_duplicate_text
 
@@ -30,30 +30,6 @@ class PromptTemplate:
         for k, v in kwargs.items():
             out = out.replace(f"{{{k}}}", v)
         return out
-
-
-def call_api_model(model: str, system: str, user: str, api_key: str) -> str:
-    payload = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
-        ]
-    }).encode()
-    req = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions",
-                                  data=payload,
-                                  headers={"Content-Type": "application/json",
-                                           "Authorization": f"Bearer {api_key}"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        body = resp.read()
-    try:
-        result = json.loads(body)
-    except json.JSONDecodeError as e:
-        raise ExtractionError(f"OpenRouter returned non-JSON response: {e}") from e
-    try:
-        return result["choices"][0]["message"]["content"]
-    except (KeyError, TypeError, IndexError) as e:
-        raise ExtractionError(f"OpenRouter response missing expected structure: {e}") from e
 
 
 def load_prompt(name: str, prompts_dir: str | None = None) -> PromptTemplate:
@@ -82,6 +58,7 @@ def extract_memories(
     compressed_transcript: str,
     conn,
     model: str,
+    base_url: str,
     api_key: str,
     session_id: str,
     deduplicate_text_threshold: float = 0.95,
@@ -101,7 +78,7 @@ def extract_memories(
         compressed_transcript=compressed_transcript,
         existing_memories=existing_str,
     )
-    response_text = call_api_model(model, system_prompt, user_prompt, api_key)
+    response_text = call_llm(model, system_prompt, user_prompt, base_url, api_key)
     try:
         memories = json.loads(response_text)
     except json.JSONDecodeError:

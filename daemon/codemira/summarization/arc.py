@@ -3,7 +3,7 @@ import logging
 import sqlite3
 
 from codemira.extraction.chunker import estimate_token_count, PROMPT_OVERHEAD_TOKENS, split_into_turns, pack_turns_into_chunks
-from codemira.extraction.compressor import call_ollama
+from codemira.llm import call_llm
 from codemira.extraction.extractor import load_prompt
 from codemira.store.db import upsert_arc_fragment, get_arc_fragments, delete_arc_fragments_from
 
@@ -42,7 +42,8 @@ def generate_arc(
     opencode_conn: sqlite3.Connection,
     memory_conn: sqlite3.Connection,
     model: str,
-    ollama_url: str,
+    base_url: str,
+    api_key: str,
     prompts_dir: str,
     context_length: int,
     chunk_target_tokens: int = 30_000,
@@ -87,7 +88,7 @@ def generate_arc(
     for i in range(first_dirty, len(chunks)):
         user_prompt = arc_user_template.render(transcript=chunks[i], prior_arc=prior_arc)
         try:
-            fragment = call_ollama(model, system_prompt, user_prompt, ollama_url)
+            fragment = call_llm(model, system_prompt, user_prompt, base_url, api_key)
         except Exception as e:
             log.error("Arc summarizer failed for session %s at chunk %d: %s", session_id, i, e)
             if arc_parts:

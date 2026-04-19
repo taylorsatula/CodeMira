@@ -9,14 +9,14 @@ LOG_DIR = os.path.expanduser("~/Library/Logs/codemira")
 
 
 def _collect_env_vars() -> dict[str, str]:
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    api_key = os.environ.get("CODEMIRA_EXTRACTION_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError(
-            "OPENROUTER_API_KEY is not set. Export it in your shell before running "
+            "CODEMIRA_EXTRACTION_API_KEY is not set. Export it in your shell before running "
             "`python -m codemira.launchd install` — launchd agents do not inherit "
             "your shell environment at runtime, so the key must be baked into the plist."
         )
-    env = {"OPENROUTER_API_KEY": api_key}
+    env: dict[str, str] = {}
     opencode_db = os.environ.get("OPENCODE_DB")
     if opencode_db:
         env["OPENCODE_DB"] = opencode_db

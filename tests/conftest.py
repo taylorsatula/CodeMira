@@ -5,10 +5,13 @@ import os
 import numpy as np
 
 
-def ollama_available() -> bool:
+def llm_available() -> bool:
+    import urllib.error
     import urllib.request
     try:
-        urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+        urllib.request.urlopen("http://localhost:11434/v1/models", timeout=2)
+        return True
+    except urllib.error.HTTPError:
         return True
     except Exception:
         return False
@@ -23,7 +26,7 @@ def embedding_model_available() -> bool:
         return False
 
 
-skip_no_ollama = pytest.mark.skipif(not ollama_available(), reason="Ollama not available")
+skip_no_local_llm = pytest.mark.skipif(not llm_available(), reason="Local LLM endpoint not available")
 skip_no_embeddings = pytest.mark.skipif(not embedding_model_available(), reason="Embedding model not available")
 
 

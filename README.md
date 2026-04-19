@@ -8,9 +8,9 @@ CodeMira watches your OpenCode sessions, extracts patterns and decisions from id
 
 Two processes cooperate:
 
-1. **Python daemon** — runs in the background, monitors OpenCode sessions for idle time, compresses tool call transcripts via Ollama, extracts memories via OpenRouter, stores them in SQLite + hnswlib (ANN) + FTS5, and serves retrieval requests over HTTP.
+1. **Python daemon** — runs in the background, monitors OpenCode sessions for idle time, compresses tool call transcripts and extracts memories via OpenAI-compatible LLM endpoints (Ollama, OpenRouter, vLLM, llama.cpp, OpenAI itself, etc.), stores them in SQLite + hnswlib (ANN) + FTS5, and serves retrieval requests over HTTP.
 
-2. **TypeScript plugin** — hooks into OpenCode's `experimental.chat.messages.transform`, calls a local Ollama model (the "subcortical") to analyze the current conversation intent, queries the daemon for relevant memories, and injects a `<developer_context>` HUD block into the message stream.
+2. **TypeScript plugin** — hooks into OpenCode's `experimental.chat.messages.transform`, calls an OpenAI-compatible LLM (the "subcortical", Ollama by default) to analyze the current conversation intent, queries the daemon for relevant memories, and injects a `<developer_context>` HUD block into the message stream.
 
 Retrieval uses hybrid search: BM25 (full-text), ANN (cosine similarity via hnswlib), and Reciprocal Rank Fusion. Entity-based hub discovery pulls in memories linked to the same technologies. A dedup layer (fuzzy text + vector similarity) prevents storing near-duplicates.
 
@@ -33,13 +33,13 @@ pip install -e .
 
 Requires:
 - Python 3.12+
-- Ollama running locally (for compression and subcortical inference)
-- An OpenRouter API key (for memory extraction)
+- An OpenAI-compatible LLM endpoint for the subcortical / consolidation / arc roles. Default: Ollama at `http://localhost:11434/v1` (Ollama 0.1+ exposes the OpenAI-compat path natively). Any provider that speaks `POST /chat/completions` works — vLLM, llama.cpp's HTTP server, LM Studio, etc.
+- An OpenAI-compatible endpoint with API key for the extraction role. Default: OpenRouter (`https://openrouter.ai/api/v1`). Substitute OpenAI, Together, Anthropic-via-proxy, or your own self-hosted endpoint as needed.
 - SQLite, hnswlib, rapidfuzz (installed via pip)
 
 Set environment variables:
 ```bash
-export OPENROUTER_API_KEY=sk-or-v1-...
+export CODEMIRA_EXTRACTION_API_KEY=sk-or-v1-...
 ```
 
 Run:
@@ -64,7 +64,7 @@ Add the plugin to your global OpenCode config at `~/.config/opencode/opencode.js
 
 This makes it available in every OpenCode session regardless of working directory. OpenCode auto-discovers plugins from this config on startup.
 
-Requires Bun or a bundler that handles TypeScript ESM. Ollama must be running locally (the plugin calls the subcortical model for intent analysis).
+Requires Bun or a bundler that handles TypeScript ESM. The plugin calls an OpenAI-compatible LLM for the subcortical model — by default Ollama at `http://localhost:11434/v1`. Override via `subcorticalBaseUrl` / `subcorticalApiKey` in plugin options to point at any other provider.
 
 Prompt templates are loaded from `prompts/` relative to the plugin source (`plugin/src/../../prompts`). Missing files raise a fatal error at plugin load — the plugin does not silently no-op.
 
@@ -75,11 +75,19 @@ Prompt templates are loaded from `prompts/` relative to the plugin source (`plug
 | `CODEMIRA_HTTP_PORT` | `9473` | Daemon HTTP port (bound to `127.0.0.1`) |
 | `CODEMIRA_POLL_INTERVAL_MINUTES` | `15` | Minutes between daemon poll cycles |
 | `CODEMIRA_IDLE_THRESHOLD_MINUTES` | `60` | Minutes before a session is considered idle |
-| `CODEMIRA_EXTRACTION_MODEL` | `z-ai/glm-5.1` | OpenRouter model for extraction |
-| `CODEMIRA_SUBCORTICAL_MODEL` | `gemma4:e2b` | Ollama model for subcortical / compression / link classification |
-| `CODEMIRA_CONSOLIDATION_MODEL` | `gemma4:e4b` | Ollama model for memory consolidation |
+| `CODEMIRA_EXTRACTION_MODEL` | `z-ai/glm-5.1` | Model name for memory extraction |
+| `CODEMIRA_EXTRACTION_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible endpoint for extraction |
+| `CODEMIRA_EXTRACTION_API_KEY` | — | Required. API key for the extraction endpoint. |
+| `CODEMIRA_SUBCORTICAL_MODEL` | `gemma4:e2b` | Model name for subcortical / compression / link classification |
+| `CODEMIRA_SUBCORTICAL_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint for the subcortical roles |
+| `CODEMIRA_SUBCORTICAL_API_KEY` | `""` | API key for the subcortical endpoint (empty for Ollama) |
+| `CODEMIRA_CONSOLIDATION_MODEL` | `gemma4:e4b` | Model name for memory consolidation |
+| `CODEMIRA_CONSOLIDATION_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint for consolidation |
+| `CODEMIRA_CONSOLIDATION_API_KEY` | `""` | API key for the consolidation endpoint |
+| `CODEMIRA_ARC_MODEL` | `gemma4:e2b` | Model name for arc summarization |
+| `CODEMIRA_ARC_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint for arc generation |
+| `CODEMIRA_ARC_API_KEY` | `""` | API key for the arc endpoint |
 | `CODEMIRA_MAX_SURFACED_MEMORIES` | `8` | Max memories per retrieval |
-| `OPENROUTER_API_KEY` | — | Required for extraction |
 | `OPENCODE_DB` | auto-discovered | Override path to OpenCode's global database |
 
 Memory stores are always located at `<project-worktree>/.codememory/` — there is no configurable data directory and no global fallback.
@@ -96,14 +104,14 @@ cd .. && python -m pytest tests/ -v
 cd plugin && bun test
 ```
 
-> **Note:** Embedding tests require the `MongoDB/mdbr-leaf-ir-asym` model to be downloaded (first run will fetch it). OpenRouter tests require `OPENROUTER_API_KEY` in the environment.
+> **Note:** Embedding tests require the `MongoDB/mdbr-leaf-ir-asym` model to be downloaded (first run will fetch it). Remote-extraction tests require `CODEMIRA_EXTRACTION_API_KEY` in the environment.
 
 ## Development
 
 For faster iteration during development, lower the poll and idle thresholds:
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-v1-...
+export CODEMIRA_EXTRACTION_API_KEY=sk-or-v1-...
 CODEMIRA_POLL_INTERVAL_MINUTES=1 CODEMIRA_IDLE_THRESHOLD_MINUTES=1 python -m codemira.daemon
 ```
 

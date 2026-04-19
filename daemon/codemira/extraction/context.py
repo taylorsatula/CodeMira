@@ -9,4 +9,3 @@ class ExtractionContext:
     store: Store
     opencode_conn: sqlite3.Connection
     prompts_dir: str
-    api_key: str

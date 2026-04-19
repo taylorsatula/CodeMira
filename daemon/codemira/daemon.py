@@ -8,7 +8,7 @@ from codemira.extraction.context import ExtractionContext
 from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity, insert_memory_link, log_extraction, mark_extraction_complete, get_memory
 from codemira.store.manager import StoreManager
 from codemira.server import create_server
-from codemira.extraction.compressor import ollama_tool_compressor
+from codemira.extraction.compressor import tool_compressor
 from codemira.extraction.extractor import extract_memories
 from codemira.extraction.chunker import chunk_compressed_transcript, estimate_token_count
 from codemira.extraction.dedup import is_duplicate_vector, extract_entities
@@ -33,7 +33,10 @@ def extract_session_memories(
                 log_extraction(store.conn, session_id, 0)
                 return
             try:
-                compressor = ollama_tool_compressor(config.subcortical_model, config.ollama_url, ctx.prompts_dir)
+                compressor = tool_compressor(
+                    config.subcortical_model, config.subcortical_base_url,
+                    config.subcortical_api_key, ctx.prompts_dir,
+                )
                 transcript = render_transcript(iter_turns(conversation), compressor)
                 from codemira.store.db import get_existing_memory_texts
                 existing_memories_token_estimate = estimate_token_count(
@@ -48,7 +51,8 @@ def extract_session_memories(
                 prior_texts: list[str] = []
                 for chunk in chunks:
                     chunk_memories = extract_memories(
-                        chunk, store.conn, config.extraction_model, ctx.api_key,
+                        chunk, store.conn, config.extraction_model,
+                        config.extraction_base_url, config.extraction_api_key,
                         session_id, config.deduplicate_text_threshold, ctx.prompts_dir,
                         prior_chunk_texts=prior_texts if prior_texts else None,
                     )
@@ -73,7 +77,9 @@ def extract_session_memories(
                 memory_id = insert_memory(store.conn, mem["text"],
                                           mem["category"], emb, session_id)
                 entities = extract_entities(
-                    mem["text"], config.subcortical_model, config.ollama_url, ctx.prompts_dir,
+                    mem["text"], config.subcortical_model,
+                    config.subcortical_base_url, config.subcortical_api_key,
+                    ctx.prompts_dir,
                 )
                 for entity in entities:
                     entity_id = get_or_create_entity(store.conn, entity["name"], entity["type"])
@@ -86,7 +92,9 @@ def extract_session_memories(
                             continue
                         link_type = classify_link(
                             mem["text"], linked_mem["text"],
-                            config.subcortical_model, config.ollama_url, ctx.prompts_dir,
+                            config.subcortical_model,
+                            config.subcortical_base_url, config.subcortical_api_key,
+                            ctx.prompts_dir,
                         )
                         insert_memory_link(store.conn, memory_id, linked_id, link_type)
                 store.index.add_vector(memory_id, emb)
@@ -140,10 +148,9 @@ def run_daemon(config: DaemonConfig | None = None):
                     manager.get(project_root)
                 extracted_ids = _collect_extracted_session_ids(manager)
                 idle_sessions = find_idle_sessions(opencode_conn, extracted_ids, config.idle_threshold_minutes)
-                api_key = os.environ.get("OPENROUTER_API_KEY", "")
-                if not api_key:
+                if not config.extraction_api_key:
                     if idle_sessions:
-                        log.error("OPENROUTER_API_KEY not set — skipping %d idle session(s)", len(idle_sessions))
+                        log.error("CODEMIRA_EXTRACTION_API_KEY not set — skipping %d idle session(s)", len(idle_sessions))
                 else:
                     for session in idle_sessions:
                         if not session["project_root"]:
@@ -155,7 +162,6 @@ def run_daemon(config: DaemonConfig | None = None):
                                 store=store,
                                 opencode_conn=opencode_conn,
                                 prompts_dir=PROMPTS_DIR,
-                                api_key=api_key,
                             )
                             extract_session_memories(session["id"], session["project_root"], ctx, config)
                         except Exception as e:
@@ -171,7 +177,9 @@ def run_daemon(config: DaemonConfig | None = None):
                         with store.lock:
                             new_ids = run_consolidation(store.conn, store.index, config.consolidation_model,
                                                         config.consolidation_similarity_threshold,
-                                                        config.ollama_url, PROMPTS_DIR)
+                                                        config.consolidation_base_url,
+                                                        config.consolidation_api_key,
+                                                        PROMPTS_DIR)
                         if new_ids:
                             log.info("Consolidated %d clusters in %s", len(new_ids), project_root)
                     last_consolidation = now

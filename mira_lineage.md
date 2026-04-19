@@ -15,7 +15,7 @@ Concept-by-concept mapping between Mira (`../botwithmemory`) and CodeMira. Each 
 ## 2. Extraction orchestrator
 
 - **Mira**: `lt_memory/processing/orchestrator.py` (chunk → build payload → submit) + `extraction_engine.py` (LLM payload assembly with UUID short-ID mapping).
-- **CodeMira**: `daemon/codemira/extraction/extractor.py:extract_memories` (single-shot OpenRouter GLM-5.1, no chunking yet) + the compression pre-step `daemon/codemira/extraction/compressor.py:call_ollama` that doesn't exist in Mira (Mira's transcripts don't have giant tool I/O blobs).
+- **CodeMira**: `daemon/codemira/extraction/extractor.py:extract_memories` (single-shot OpenAI-compatible call via `call_llm`, default OpenRouter GLM-5.1, no chunking yet) + the compression pre-step `daemon/codemira/extraction/compressor.py:tool_compressor` that doesn't exist in Mira (Mira's transcripts don't have giant tool I/O blobs).
 - *Pin*: same role; CodeMira added a pre-extraction Ollama compression pass because tool traces would blow the extractor's context.
 
 ## 3. Extraction prompts

@@ -21,7 +21,8 @@ function generateOpencodeId(prefix: "msg" | "prt"): string {
 
 interface PluginOptions {
   daemonUrl?: string
-  ollamaUrl?: string
+  subcorticalBaseUrl?: string
+  subcorticalApiKey?: string
   subcorticalModel?: string
   toolTraceWindow?: number
   memoryTruncationWords?: number
@@ -48,7 +49,8 @@ interface Hooks {
 
 const DEFAULT_OPTIONS: Required<PluginOptions> = {
   daemonUrl: "http://localhost:9473",
-  ollamaUrl: "http://localhost:11434",
+  subcorticalBaseUrl: "http://localhost:11434/v1",
+  subcorticalApiKey: "",
   // Development: gemma4:e2b (local, fast). Upgrade to gemma4:26b-a4b for production.
   subcorticalModel: "gemma4:e2b",
   toolTraceWindow: 5,
@@ -56,15 +58,18 @@ const DEFAULT_OPTIONS: Required<PluginOptions> = {
   loud: false,
 }
 
-async function callOllama(
+async function callLlm(
   systemPrompt: string,
   userPrompt: string,
-  ollamaUrl: string,
+  baseUrl: string,
+  apiKey: string,
   model: string,
 ): Promise<string> {
-  const response = await fetch(`${ollamaUrl}/api/chat`, {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       model,
       messages: [
@@ -74,8 +79,10 @@ async function callOllama(
       stream: false,
     }),
   })
-  const data = (await response.json()) as { message?: { content?: string } }
-  return data.message?.content || ""
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>
+  }
+  return data.choices?.[0]?.message?.content || ""
 }
 
 const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = async (
@@ -163,10 +170,11 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           conversation_arc: cachedArc || "None",
         })
 
-        const subcorticalResult = await callOllama(
+        const subcorticalResult = await callLlm(
           subcorticalSystemPrompt,
           userPrompt,
-          config.ollamaUrl,
+          config.subcorticalBaseUrl,
+          config.subcorticalApiKey,
           config.subcorticalModel,
         )
 

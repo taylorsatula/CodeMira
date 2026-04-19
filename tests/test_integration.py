@@ -9,10 +9,11 @@ import urllib.request
 import numpy as np
 import pytest
 
-from tests.conftest import _make_embedding, _make_embeddings, skip_no_ollama
+from tests.conftest import _make_embedding, _make_embeddings, skip_no_local_llm
 
 
-OLLAMA_URL = "http://localhost:11434"
+LOCAL_BASE_URL = "http://localhost:11434/v1"
+LOCAL_API_KEY = ""
 ENTITY_MODEL = "gemma4:e2b"
 
 
@@ -373,7 +374,7 @@ class TestDaemonStartup:
 
 
 class TestExtractionToRetrievalPipeline:
-    @skip_no_ollama
+    @skip_no_local_llm
     def test_store_extracted_memory_then_retrieve(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
         from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity
@@ -385,7 +386,7 @@ class TestExtractionToRetrievalPipeline:
         emb = _make_embedding(seed=42)
         mid = insert_memory(memory_conn, "Uses FastAPI for REST endpoints", "decision_rationale", emb, "ses_test")
         entities = extract_entities(
-            "Uses FastAPI for REST endpoints", ENTITY_MODEL, OLLAMA_URL, prompts_dir,
+            "Uses FastAPI for REST endpoints", ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir,
         )
         for entity in entities:
             eid = get_or_create_entity(memory_conn, entity["name"], entity["type"])
@@ -510,7 +511,7 @@ class TestDedupDuringStore:
         assert is_duplicate_text("Uses Docker for deployment and containerization", existing, 0.95) is False
 
 
-@skip_no_ollama
+@skip_no_local_llm
 class TestEntityExtractionAndLinking:
     def test_extract_and_link_entities_roundtrip(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
@@ -520,7 +521,7 @@ class TestEntityExtractionAndLinking:
         text = "Uses FastAPI with Docker for deployment and pytest for testing"
         emb = _make_embedding()
         mid = insert_memory(memory_conn, text, "priority", emb, "ses_entity")
-        entities = extract_entities(text, ENTITY_MODEL, OLLAMA_URL, prompts_dir)
+        entities = extract_entities(text, ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir)
         entity_names = {e["name"] for e in entities}
         assert entity_names & {"fastapi", "docker", "pytest"}, f"Expected at least one of fastapi/docker/pytest, got {entity_names}"
         for entity in entities:
@@ -538,41 +539,46 @@ class TestEntityExtractionAndLinking:
         from codemira.extraction.dedup import extract_entities
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         entities = extract_entities(
-            "Uses FastAPI and Flask and Django", ENTITY_MODEL, OLLAMA_URL, prompts_dir,
+            "Uses FastAPI and Flask and Django", ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir,
         )
         names = {e["name"] for e in entities}
         assert names & {"fastapi", "flask", "django"}, f"Expected at least one of fastapi/flask/django, got {names}"
 
 
-class TestOllamaCompression:
-    def test_call_ollama_returns_response(self):
-        from codemira.extraction.compressor import call_ollama
-        result = call_ollama(
+@skip_no_local_llm
+class TestToolCompression:
+    def test_call_llm_returns_response(self):
+        from codemira.llm import call_llm
+        result = call_llm(
             "gemma4:e2b",
             "You are a helpful assistant. Reply with exactly: HELLO",
             "Say hello",
+            LOCAL_BASE_URL,
+            LOCAL_API_KEY,
         )
         assert len(result.strip()) > 0
         assert "HELLO" in result.upper(), f"Expected HELLO in response, got: {result!r}"
 
-    def test_call_ollama_compression_prompt(self):
-        from codemira.extraction.compressor import call_ollama
-        result = call_ollama(
+    def test_call_llm_compression_prompt(self):
+        from codemira.llm import call_llm
+        result = call_llm(
             "gemma4:e2b",
             "Summarize the following tool call in one short sentence.",
             "Tool: bash\nArguments: {'command': 'pip install fastapi'}\nResult: Successfully installed fastapi-0.104.1",
+            LOCAL_BASE_URL,
+            LOCAL_API_KEY,
         )
         assert len(result.strip()) > 0
         assert len(result) < 500
         assert "fastapi" in result.lower() or "install" in result.lower(), f"Compression should mention fastapi or install, got: {result!r}"
 
-    def test_call_ollama_wrong_model_raises(self):
-        from codemira.extraction.compressor import call_ollama
+    def test_call_llm_wrong_model_raises(self):
+        from codemira.llm import call_llm
         with pytest.raises(Exception):
-            call_ollama("nonexistent-model-xyz", "system", "user")
+            call_llm("nonexistent-model-xyz", "system", "user", LOCAL_BASE_URL, LOCAL_API_KEY)
 
-    def test_ollama_tool_compressor_produces_transcript(self, opencode_setup):
-        from codemira.extraction.compressor import ollama_tool_compressor
+    def test_tool_compressor_produces_transcript(self, opencode_setup):
+        from codemira.extraction.compressor import tool_compressor
         from codemira.extraction.transcript import iter_turns, render_transcript
         opencode_conn, _, _, _ = opencode_setup
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -585,15 +591,16 @@ class TestOllamaCompression:
         )
         from codemira.opencode_db import read_session_conversation
         conversation = read_session_conversation(opencode_conn, "ses_comp_1")
-        compressor = ollama_tool_compressor("gemma4:e2b", "http://localhost:11434", prompts_dir)
+        compressor = tool_compressor("gemma4:e2b", LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir)
         result = render_transcript(iter_turns(conversation), compressor)
         assert len(result.strip()) > 0
         assert "fastapi" in result.lower(), f"Compressed transcript should mention fastapi, got: {result!r}"
 
 
-class TestOllamaSubcortical:
+@skip_no_local_llm
+class TestSubcorticalAnalysis:
     def test_subcortical_returns_xml(self):
-        from codemira.extraction.compressor import call_ollama
+        from codemira.llm import call_llm
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         with open(os.path.join(prompts_dir, "subcortical_system.txt")) as f:
             system_prompt = f.read()
@@ -602,27 +609,28 @@ class TestOllamaSubcortical:
             "Recent actions:\n<action tool=\"bash\" target=\"pip install fastapi\" result=\"installed\" />\n"
             "Pinned memories: None"
         )
-        result = call_ollama("gemma4:e2b", system_prompt, user_prompt)
+        result = call_llm("gemma4:e2b", system_prompt, user_prompt, LOCAL_BASE_URL, LOCAL_API_KEY)
         assert len(result.strip()) > 0
         assert "<query_expansion>" in result, f"Subcortical must emit <query_expansion>, got: {result!r}"
         assert "<entities>" in result, f"Subcortical must emit <entities>, got: {result!r}"
         assert "<keep>" in result, f"Subcortical must emit <keep>, got: {result!r}"
 
 
-class TestOpenRouterExtraction:
+class TestExtractionRemote:
     @pytest.fixture
     def api_key(self):
-        key = os.environ.get("OPENROUTER_API_KEY", "")
+        key = os.environ.get("CODEMIRA_EXTRACTION_API_KEY", "")
         if not key:
-            pytest.skip("OPENROUTER_API_KEY not set")
+            pytest.skip("CODEMIRA_EXTRACTION_API_KEY not set")
         return key
 
-    def test_call_api_model_returns_response(self, api_key):
-        from codemira.extraction.extractor import call_api_model
-        result = call_api_model(
+    def test_call_llm_returns_response(self, api_key):
+        from codemira.llm import call_llm
+        result = call_llm(
             "z-ai/GLM-5.1",
             "You are a helpful assistant. Reply with exactly: HELLO",
             "Say hello",
+            "https://openrouter.ai/api/v1",
             api_key,
         )
         assert "HELLO" in result.upper(), f"Expected HELLO in response, got: {result!r}"
@@ -645,7 +653,8 @@ class TestOpenRouterExtraction:
         )
         memories = extract_memories(
             compressed, memory_conn,
-            "z-ai/GLM-5.1", api_key,
+            "z-ai/GLM-5.1", "https://openrouter.ai/api/v1", api_key,
+            "ses_extract_remote",
             deduplicate_text_threshold=0.95,
             prompts_dir=prompts_dir,
         )
@@ -664,7 +673,8 @@ class TestOpenRouterExtraction:
         compressed = "User chose FastAPI for building their REST API project."
         memories = extract_memories(
             compressed, memory_conn,
-            "z-ai/GLM-5.1", api_key,
+            "z-ai/GLM-5.1", "https://openrouter.ai/api/v1", api_key,
+            "ses_extract_dedup",
             deduplicate_text_threshold=0.85,
             prompts_dir=prompts_dir,
         )
@@ -674,10 +684,11 @@ class TestOpenRouterExtraction:
             assert not is_duplicate_text(m["text"], existing, 0.85)
 
 
-class TestFullOllamaPipeline:
+@skip_no_local_llm
+class TestFullExtractionPipeline:
     def test_compress_then_extract_stores_memories(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
-        from codemira.extraction.compressor import ollama_tool_compressor
+        from codemira.extraction.compressor import tool_compressor
         from codemira.extraction.transcript import iter_turns, render_transcript
         from codemira.opencode_db import read_session_conversation
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -701,7 +712,7 @@ class TestFullOllamaPipeline:
         conversation = read_session_conversation(opencode_conn, "ses_full_1")
         assert len(conversation) == 5, f"Expected 5 messages (2 user + 3 assistant), got {len(conversation)}"
         assert [m["role"] for m in conversation] == ["user", "assistant", "assistant", "user", "assistant"]
-        compressor = ollama_tool_compressor("gemma4:e2b", "http://localhost:11434", prompts_dir)
+        compressor = tool_compressor("gemma4:e2b", LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir)
         compressed = render_transcript(iter_turns(conversation), compressor)
         assert len(compressed.strip()) > 0
         domain_terms = {"fastapi", "docker", "pytest"}

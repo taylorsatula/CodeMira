@@ -58,12 +58,12 @@ class TestSplitIntoTurns:
 class TestChunkTranscript:
     def test_short_returns_single(self):
         transcript = "User: hello\nAssistant: hi"
-        assert _chunk_transcript(transcript, 128000) == [transcript]
+        assert _chunk_transcript(transcript, 128000, 30_000) == [transcript]
 
     def test_splits_long_transcript(self):
         turn = "User: " + "x" * 8000 + "\nAssistant: reply"
         transcript = "\n\n".join([turn] * 50)
-        chunks = _chunk_transcript(transcript, 32000)
+        chunks = _chunk_transcript(transcript, 32000, 30_000)
         assert len(chunks) > 1
         for chunk in chunks:
             assert chunk.startswith("User:")
