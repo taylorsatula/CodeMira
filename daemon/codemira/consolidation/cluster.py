@@ -2,10 +2,10 @@ from collections import deque
 import sqlite3
 
 from codemira.store.index import MemoryIndex
-from codemira.store.db import get_memory
+from codemira.store.db import read_memory
 
 
-def find_clusters(conn: sqlite3.Connection, index: MemoryIndex,
+def build_clusters(conn: sqlite3.Connection, index: MemoryIndex,
                   threshold: float = 0.85) -> list[list[str]]:
     rows = conn.execute(
         "SELECT id FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL"
@@ -13,7 +13,7 @@ def find_clusters(conn: sqlite3.Connection, index: MemoryIndex,
     all_ids = [r["id"] for r in rows]
     graph = {mid: set() for mid in all_ids}
     for memory_id in all_ids:
-        mem = get_memory(conn, memory_id)
+        mem = read_memory(conn, memory_id)
         if mem is None or mem["embedding"] is None:
             continue
         neighbors = index.search(mem["embedding"], k=21)

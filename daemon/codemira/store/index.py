@@ -2,7 +2,7 @@ import hnswlib
 import sqlite3
 import numpy as np
 
-from codemira.store.db import blob_to_embedding
+from codemira.store.db import parse_embedding_blob
 
 
 class MemoryIndex:

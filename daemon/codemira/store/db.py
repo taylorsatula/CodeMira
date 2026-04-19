@@ -8,7 +8,7 @@ from typing import Iterable, TypeVar
 _T = TypeVar("_T")
 
 
-def _now() -> str:
+def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -109,7 +109,7 @@ END;
 """
 
 
-def generate_memory_id() -> str:
+def build_memory_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
@@ -127,11 +127,11 @@ def open_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
-def embedding_to_blob(embedding: list[float]) -> bytes:
+def format_embedding_blob(embedding: list[float]) -> bytes:
     return struct.pack(f"{len(embedding)}f", *embedding)
 
 
-def blob_to_embedding(blob: bytes) -> list[float]:
+def parse_embedding_blob(blob: bytes) -> list[float]:
     count = len(blob) // 4
     return list(struct.unpack(f"{count}f", blob))
 
@@ -145,9 +145,9 @@ def insert_memory(
 ) -> str:
     if category not in VALID_CATEGORIES:
         raise ValueError(f"Invalid category {category!r}; must be one of {sorted(VALID_CATEGORIES)}")
-    memory_id = generate_memory_id()
-    now = _now()
-    blob = embedding_to_blob(embedding)
+    memory_id = build_memory_id()
+    now = _now_iso()
+    blob = format_embedding_blob(embedding)
     conn.execute(
         "INSERT INTO memories (id, text, category, embedding, source_session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (memory_id, text, category, blob, source_session_id, now, now),
@@ -156,17 +156,17 @@ def insert_memory(
     return memory_id
 
 
-def get_memory(conn: sqlite3.Connection, memory_id: str) -> dict | None:
+def read_memory(conn: sqlite3.Connection, memory_id: str) -> dict | None:
     row = conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
     if row is None:
         return None
     d = dict(row)
     if d["embedding"] is not None:
-        d["embedding"] = blob_to_embedding(d["embedding"])
+        d["embedding"] = parse_embedding_blob(d["embedding"])
     return d
 
 
-def get_all_memories(conn: sqlite3.Connection, include_archived: bool = False) -> list[dict]:
+def read_all_memories(conn: sqlite3.Connection, include_archived: bool = False) -> list[dict]:
     if include_archived:
         rows = conn.execute("SELECT * FROM memories").fetchall()
     else:
@@ -175,7 +175,7 @@ def get_all_memories(conn: sqlite3.Connection, include_archived: bool = False) -
     for row in rows:
         d = dict(row)
         if d["embedding"] is not None:
-            d["embedding"] = blob_to_embedding(d["embedding"])
+            d["embedding"] = parse_embedding_blob(d["embedding"])
         results.append(d)
     return results
 
@@ -187,11 +187,11 @@ def update_memory(conn: sqlite3.Connection, memory_id: str, **kwargs) -> bool:
         if key not in allowed:
             raise ValueError(f"Cannot update field: {key}")
         if key == "embedding" and value is not None:
-            value = embedding_to_blob(value)
+            value = format_embedding_blob(value)
         updates[key] = value
     if not updates:
         return False
-    updates["updated_at"] = _now()
+    updates["updated_at"] = _now_iso()
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [memory_id]
     cursor = conn.execute(f"UPDATE memories SET {set_clause} WHERE id = ?", values)
@@ -208,12 +208,12 @@ def delete_memory(conn: sqlite3.Connection, memory_id: str) -> bool:
 
 
 def archive_memory(conn: sqlite3.Connection, memory_id: str) -> bool:
-    now = _now()
+    now = _now_iso()
     return update_memory(conn, memory_id, is_archived=1, archived_at=now)
 
 
-def increment_access(conn: sqlite3.Connection, memory_ids: list[str]):
-    now = _now()
+def update_access_counts(conn: sqlite3.Connection, memory_ids: list[str]):
+    now = _now_iso()
     for mid in memory_ids:
         conn.execute(
             "UPDATE memories SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?",
@@ -223,13 +223,13 @@ def increment_access(conn: sqlite3.Connection, memory_ids: list[str]):
 
 
 def insert_entity(conn: sqlite3.Connection, name: str, entity_type: str) -> str:
-    entity_id = generate_memory_id()
+    entity_id = build_memory_id()
     conn.execute("INSERT INTO entities (id, name, type) VALUES (?, ?, ?)", (entity_id, name, entity_type))
     conn.commit()
     return entity_id
 
 
-def get_or_create_entity(conn: sqlite3.Connection, name: str, entity_type: str) -> str:
+def upsert_entity(conn: sqlite3.Connection, name: str, entity_type: str) -> str:
     row = conn.execute("SELECT id FROM entities WHERE name = ?", (name,)).fetchone()
     if row:
         return row["id"]
@@ -241,7 +241,7 @@ def link_memory_entity(conn: sqlite3.Connection, memory_id: str, entity_id: str)
     conn.commit()
 
 
-def get_entities_for_memory(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
+def read_entities_for_memory(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
     rows = conn.execute(
         "SELECT e.* FROM entities e JOIN memory_entities me ON e.id = me.entity_id WHERE me.memory_id = ?",
         (memory_id,),
@@ -249,7 +249,7 @@ def get_entities_for_memory(conn: sqlite3.Connection, memory_id: str) -> list[di
     return [dict(r) for r in rows]
 
 
-def get_memories_by_entity(conn: sqlite3.Connection, entity_name: str) -> list[dict]:
+def read_memories_by_entity(conn: sqlite3.Connection, entity_name: str) -> list[dict]:
     rows = conn.execute(
         "SELECT m.* FROM memories m JOIN memory_entities me ON m.id = me.memory_id JOIN entities e ON e.id = me.entity_id WHERE e.name = ? AND m.is_archived = 0",
         (entity_name,),
@@ -258,7 +258,7 @@ def get_memories_by_entity(conn: sqlite3.Connection, entity_name: str) -> list[d
     for row in rows:
         d = dict(row)
         if d["embedding"] is not None:
-            d["embedding"] = blob_to_embedding(d["embedding"])
+            d["embedding"] = parse_embedding_blob(d["embedding"])
         results.append(d)
     return results
 
@@ -270,7 +270,7 @@ def insert_memory_link(
     link_type: str,
     reasoning: str | None = None,
 ):
-    now = _now()
+    now = _now_iso()
     conn.execute(
         "INSERT OR IGNORE INTO memory_links (memory_id, linked_memory_id, link_type, reasoning, created_at) VALUES (?, ?, ?, ?, ?)",
         (memory_id, linked_memory_id, link_type, reasoning, now),
@@ -278,7 +278,7 @@ def insert_memory_link(
     conn.commit()
 
 
-def get_linked_memories(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
+def read_linked_memories(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
     rows = conn.execute(
         "SELECT m.*, ml.link_type, ml.reasoning FROM memories m JOIN memory_links ml ON m.id = ml.linked_memory_id WHERE ml.memory_id = ? AND m.is_archived = 0",
         (memory_id,),
@@ -287,7 +287,7 @@ def get_linked_memories(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
 
 
 def log_extraction(conn: sqlite3.Connection, session_id: str, memory_count: int, is_complete: bool = True) -> int:
-    now = _now()
+    now = _now_iso()
     complete_flag = 1 if is_complete else 0
     conn.execute(
         "INSERT INTO extraction_log (session_id, extracted_at, memory_count, attempt_count, is_complete) "
@@ -304,8 +304,8 @@ def log_extraction(conn: sqlite3.Connection, session_id: str, memory_count: int,
     return row["attempt_count"]
 
 
-def mark_extraction_complete(conn: sqlite3.Connection, session_id: str):
-    now = _now()
+def update_extraction_complete(conn: sqlite3.Connection, session_id: str):
+    now = _now_iso()
     conn.execute(
         "UPDATE extraction_log SET is_complete = 1, extracted_at = ? WHERE session_id = ?",
         (now, session_id),
@@ -318,13 +318,13 @@ def is_session_extracted(conn: sqlite3.Connection, session_id: str) -> bool:
     return row is not None
 
 
-def get_existing_memory_texts(conn: sqlite3.Connection) -> list[str]:
+def read_active_memory_texts(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute("SELECT text FROM memories WHERE is_archived = 0").fetchall()
     return [r["text"] for r in rows]
 
 
 def upsert_arc_fragment(conn: sqlite3.Connection, session_id: str, fragment_index: int, arc_text: str, content_hash: str, message_count: int):
-    now = _now()
+    now = _now_iso()
     conn.execute(
         "INSERT INTO arc_fragments (session_id, fragment_index, arc_text, content_hash, message_count, generated_at) "
         "VALUES (?, ?, ?, ?, ?, ?) "
@@ -338,7 +338,7 @@ def upsert_arc_fragment(conn: sqlite3.Connection, session_id: str, fragment_inde
     conn.commit()
 
 
-def get_arc_fragments(conn: sqlite3.Connection, session_id: str) -> list[dict]:
+def read_arc_fragments(conn: sqlite3.Connection, session_id: str) -> list[dict]:
     rows = conn.execute(
         "SELECT * FROM arc_fragments WHERE session_id = ? ORDER BY fragment_index ASC",
         (session_id,),
@@ -354,7 +354,7 @@ def delete_arc_fragments_from(conn: sqlite3.Connection, session_id: str, from_in
     conn.commit()
 
 
-def get_arc(conn: sqlite3.Connection, session_id: str) -> dict | None:
+def read_arc(conn: sqlite3.Connection, session_id: str) -> dict | None:
     rows = conn.execute(
         "SELECT * FROM arc_fragments WHERE session_id = ? ORDER BY fragment_index ASC",
         (session_id,),

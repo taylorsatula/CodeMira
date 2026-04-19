@@ -1,14 +1,14 @@
 from codemira.extraction.transcript import USER_PREFIX
 
 
-def estimate_token_count(text: str) -> int:
+def get_token_count(text: str) -> int:
     return len(text) // 4
 
 
 PROMPT_OVERHEAD_TOKENS = 2048
 
 
-def split_into_turns(transcript: str) -> list[str]:
+def parse_turns(transcript: str) -> list[str]:
     turns: list[str] = []
     current_lines: list[str] = []
     for line in transcript.split("\n"):
@@ -21,15 +21,15 @@ def split_into_turns(transcript: str) -> list[str]:
     return [t for t in turns if t.strip()]
 
 
-def pack_turns_into_chunks(transcript: str, budget: int) -> list[str]:
-    if estimate_token_count(transcript) <= budget:
+def build_chunks(transcript: str, budget: int) -> list[str]:
+    if get_token_count(transcript) <= budget:
         return [transcript]
-    turns = split_into_turns(transcript)
+    turns = parse_turns(transcript)
     chunks: list[str] = []
     current_turns: list[str] = []
     current_tokens = 0
     for turn in turns:
-        turn_tokens = estimate_token_count(turn)
+        turn_tokens = get_token_count(turn)
         if current_turns and current_tokens + turn_tokens > budget:
             chunks.append("\n\n".join(current_turns))
             current_turns = [turn]
@@ -44,7 +44,7 @@ def pack_turns_into_chunks(transcript: str, budget: int) -> list[str]:
     return chunks
 
 
-def chunk_compressed_transcript(transcript: str, context_length: int, existing_memories_token_estimate: int = 0, chunk_target_tokens: int = 75_000) -> list[str]:
+def build_extraction_chunks(transcript: str, context_length: int, existing_memories_token_estimate: int = 0, chunk_target_tokens: int = 75_000) -> list[str]:
     chunk_budget = max(chunk_target_tokens, int(0.7 * context_length)) - PROMPT_OVERHEAD_TOKENS - existing_memories_token_estimate
     chunk_budget = max(chunk_budget, 1024)
-    return pack_turns_into_chunks(transcript, chunk_budget)
+    return build_chunks(transcript, chunk_budget)

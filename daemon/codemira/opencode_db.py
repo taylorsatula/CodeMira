@@ -8,7 +8,7 @@ MACOS_DB_PATH = os.path.expanduser("~/Library/Application Support/opencode/openc
 LINUX_DB_PATH = os.path.expanduser("~/.local/share/opencode/opencode.db")
 
 
-def discover_opencode_db(override: str | None = None) -> str:
+def pick_opencode_db_path(override: str | None = None) -> str:
     if override:
         return override
     env_path = os.environ.get("OPENCODE_DB")
@@ -41,7 +41,7 @@ class OpenCodeConnection:
         self.conn: sqlite3.Connection | None = None
 
     def __enter__(self) -> sqlite3.Connection:
-        path = discover_opencode_db(self._override)
+        path = pick_opencode_db_path(self._override)
         self.conn = open_opencode_db(path)
         return self.conn
 
@@ -55,7 +55,7 @@ def _is_valid_worktree(path: str | None) -> bool:
     return bool(path) and os.path.abspath(path) != os.sep
 
 
-def find_idle_sessions(opencode_conn: sqlite3.Connection, extracted_session_ids: set[str], idle_threshold_minutes: int, min_messages: int = 4) -> list[dict]:
+def read_idle_sessions(opencode_conn: sqlite3.Connection, extracted_session_ids: set[str], idle_threshold_minutes: int, min_messages: int = 4) -> list[dict]:
     import time
     cutoff_ms = int((time.time() - idle_threshold_minutes * 60) * 1000)
     rows = opencode_conn.execute(
@@ -75,7 +75,7 @@ def find_idle_sessions(opencode_conn: sqlite3.Connection, extracted_session_ids:
     return results
 
 
-def list_project_roots(opencode_conn: sqlite3.Connection) -> list[str]:
+def read_project_roots(opencode_conn: sqlite3.Connection) -> list[str]:
     rows = opencode_conn.execute("SELECT DISTINCT worktree FROM project WHERE worktree IS NOT NULL").fetchall()
     return [r["worktree"] for r in rows if _is_valid_worktree(r["worktree"]) and os.path.isdir(r["worktree"])]
 

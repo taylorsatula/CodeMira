@@ -31,9 +31,9 @@ def cluster_setup(tmpdir_path, memory_db):
 
 class TestFindClusters:
     def test_finds_cluster_of_similar(self, cluster_setup):
-        from codemira.consolidation.cluster import find_clusters
+        from codemira.consolidation.cluster import build_clusters
         conn, mi, ids = cluster_setup
-        clusters = find_clusters(conn, mi, threshold=0.5)
+        clusters = build_clusters(conn, mi, threshold=0.5)
         assert len(clusters) >= 1
         all_clustered = set()
         for c in clusters:
@@ -45,25 +45,25 @@ class TestFindClusters:
             assert different_id not in c or len(c) > 1, "Different memory shouldn't form a singleton cluster"
 
     def test_no_clusters_below_threshold(self, cluster_setup):
-        from codemira.consolidation.cluster import find_clusters
+        from codemira.consolidation.cluster import build_clusters
         conn, mi, ids = cluster_setup
-        clusters = find_clusters(conn, mi, threshold=0.99)
+        clusters = build_clusters(conn, mi, threshold=0.99)
         assert len(clusters) == 0
 
     def test_empty_db(self, memory_db, tmpdir_path):
-        from codemira.consolidation.cluster import find_clusters
+        from codemira.consolidation.cluster import build_clusters
         from codemira.store.index import MemoryIndex
         index_path = os.path.join(tmpdir_path, "memories.index")
         mi = MemoryIndex(os.path.join(tmpdir_path, "memories.db"), index_path)
         mi.build_from_db(memory_db)
-        clusters = find_clusters(memory_db, mi)
+        clusters = build_clusters(memory_db, mi)
         assert len(clusters) == 0
 
 
 class TestClusterSizes:
     def test_cluster_has_at_least_two(self, cluster_setup):
-        from codemira.consolidation.cluster import find_clusters
+        from codemira.consolidation.cluster import build_clusters
         conn, mi, ids = cluster_setup
-        clusters = find_clusters(conn, mi, threshold=0.5)
+        clusters = build_clusters(conn, mi, threshold=0.5)
         for c in clusters:
             assert len(c) >= 2

@@ -5,12 +5,12 @@ import time
 from codemira.config import DaemonConfig
 from codemira.errors import ExtractionError
 from codemira.extraction.context import ExtractionContext
-from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity, insert_memory_link, log_extraction, mark_extraction_complete, get_memory
+from codemira.store.db import insert_memory, upsert_entity, link_memory_entity, insert_memory_link, log_extraction, update_extraction_complete, read_memory
 from codemira.store.manager import StoreManager
 from codemira.server import create_server
-from codemira.extraction.compressor import tool_compressor
+from codemira.extraction.compressor import build_tool_compressor
 from codemira.extraction.extractor import extract_memories
-from codemira.extraction.chunker import chunk_compressed_transcript, estimate_token_count
+from codemira.extraction.chunker import build_extraction_chunks, get_token_count
 from codemira.extraction.dedup import is_duplicate_vector, extract_entities
 from codemira.extraction.link_classifier import classify_link
 from codemira.extraction.transcript import iter_turns, render_transcript
@@ -33,16 +33,16 @@ def extract_session_memories(
                 log_extraction(store.conn, session_id, 0)
                 return
             try:
-                compressor = tool_compressor(
+                compressor = build_tool_compressor(
                     config.subcortical_model, config.subcortical_base_url,
                     config.subcortical_api_key, ctx.prompts_dir,
                 )
                 transcript = render_transcript(iter_turns(conversation), compressor)
-                from codemira.store.db import get_existing_memory_texts
-                existing_memories_token_estimate = estimate_token_count(
-                    "\n".join(get_existing_memory_texts(store.conn))
+                from codemira.store.db import read_active_memory_texts
+                existing_memories_token_estimate = get_token_count(
+                    "\n".join(read_active_memory_texts(store.conn))
                 )
-                chunks = chunk_compressed_transcript(
+                chunks = build_extraction_chunks(
                     transcript, config.extraction_model_context_length,
                     existing_memories_token_estimate,
                     chunk_target_tokens=config.extraction_chunk_target_tokens,
@@ -82,12 +82,12 @@ def extract_session_memories(
                     ctx.prompts_dir,
                 )
                 for entity in entities:
-                    entity_id = get_or_create_entity(store.conn, entity["name"], entity["type"])
+                    entity_id = upsert_entity(store.conn, entity["name"], entity["type"])
                     link_memory_entity(store.conn, memory_id, entity_id)
                 similar = store.index.search(emb, k=5)
                 for linked_id, sim in similar:
                     if sim >= config.link_similarity_threshold:
-                        linked_mem = get_memory(store.conn, linked_id)
+                        linked_mem = read_memory(store.conn, linked_id)
                         if linked_mem is None:
                             continue
                         link_type = classify_link(
@@ -109,7 +109,7 @@ def extract_session_memories(
         except Exception:
             attempt_count = log_extraction(store.conn, session_id, 0, is_complete=False)
             if attempt_count >= config.max_extraction_attempts:
-                mark_extraction_complete(store.conn, session_id)
+                update_extraction_complete(store.conn, session_id)
                 log.warning("Session %s marked as unextractable after %d failed attempts", session_id, attempt_count)
                 return
             raise
@@ -117,7 +117,7 @@ def extract_session_memories(
 
 def _collect_extracted_session_ids(manager: StoreManager) -> set[str]:
     extracted: set[str] = set()
-    for _, store in manager.items():
+    for _, store in manager.get_stores():
         with store.lock:
             rows = store.conn.execute("SELECT session_id FROM extraction_log WHERE is_complete = 1").fetchall()
             extracted.update(r["session_id"] for r in rows)
@@ -142,12 +142,12 @@ def run_daemon(config: DaemonConfig | None = None):
     first_cycle = True
     while True:
         try:
-            from codemira.opencode_db import OpenCodeConnection, find_idle_sessions, list_project_roots
+            from codemira.opencode_db import OpenCodeConnection, read_idle_sessions, read_project_roots
             with OpenCodeConnection(config.opencode_db_path) as opencode_conn:
-                for project_root in list_project_roots(opencode_conn):
+                for project_root in read_project_roots(opencode_conn):
                     manager.get(project_root)
                 extracted_ids = _collect_extracted_session_ids(manager)
-                idle_sessions = find_idle_sessions(opencode_conn, extracted_ids, config.idle_threshold_minutes)
+                idle_sessions = read_idle_sessions(opencode_conn, extracted_ids, config.idle_threshold_minutes)
                 if not config.extraction_api_key:
                     if idle_sessions:
                         log.error("CODEMIRA_EXTRACTION_API_KEY not set — skipping %d idle session(s)", len(idle_sessions))
@@ -173,7 +173,7 @@ def run_daemon(config: DaemonConfig | None = None):
             if now - last_consolidation >= config.consolidation_interval_hours * 3600:
                 try:
                     from codemira.consolidation.consolidator import run_consolidation
-                    for project_root, store in manager.items():
+                    for project_root, store in manager.get_stores():
                         with store.lock:
                             new_ids = run_consolidation(store.conn, store.index, config.consolidation_model,
                                                         config.consolidation_similarity_threshold,

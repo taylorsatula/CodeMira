@@ -3,7 +3,7 @@ from typing import Callable
 from codemira.llm import call_llm
 
 
-def tool_compressor(model: str, base_url: str, api_key: str, prompts_dir: str) -> Callable[[dict], str | None]:
+def build_tool_compressor(model: str, base_url: str, api_key: str, prompts_dir: str) -> Callable[[dict], str | None]:
     from codemira.extraction.extractor import load_prompt
     from codemira.extraction.transcript import TOOL_PREFIX
     system_prompt = load_prompt("compression_system", prompts_dir).render()

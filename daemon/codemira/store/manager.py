@@ -49,12 +49,12 @@ class StoreManager:
             self._stores[key] = store
             return store
 
-    def register(self, project_root: str, conn: sqlite3.Connection, index: MemoryIndex):
+    def add_store(self, project_root: str, conn: sqlite3.Connection, index: MemoryIndex):
         key = os.path.abspath(project_root)
         with self._lock:
             self._stores[key] = Store(conn=conn, index=index, lock=threading.Lock())
 
-    def items(self) -> list[tuple[str, Store]]:
+    def get_stores(self) -> list[tuple[str, Store]]:
         with self._lock:
             return list(self._stores.items())
 

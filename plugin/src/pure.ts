@@ -98,14 +98,14 @@ export function pickRecentTurnContext(
   return { userMessage, recentActions }
 }
 
-function truncate(text: string, words: number): string {
+function formatTruncated(text: string, words: number): string {
   const all = text.split(" ")
   const taken = all.slice(0, words).join(" ")
   return all.length > words ? `${taken}...` : taken
 }
 
 function formatMemoryLine(m: Memory, truncWords: number): string {
-  return `mem_${m.id} - ${truncate(m.text, truncWords)}`
+  return `mem_${m.id} - ${formatTruncated(m.text, truncWords)}`
 }
 
 export function formatPinnedMemories(memories: Memory[], truncWords: number): string {
@@ -169,21 +169,21 @@ export interface HudSection {
   items: HudItem[]
 }
 
-function escapeXmlAttr(v: string): string {
+function formatXmlAttr(v: string): string {
   return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;")
 }
 
-function escapeXmlText(v: string): string {
+function formatXmlText(v: string): string {
   return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 export function renderHudItem(item: HudItem): string {
   const attrs = Object.entries(item.attrs ?? {})
-    .map(([k, v]) => `${k}="${escapeXmlAttr(v)}"`)
+    .map(([k, v]) => `${k}="${formatXmlAttr(v)}"`)
     .join(" ")
   const head = attrs ? `<${item.tag} ${attrs}` : `<${item.tag}`
   if (item.content !== undefined) {
-    return `${head}>${escapeXmlText(item.content)}</${item.tag}>`
+    return `${head}>${formatXmlText(item.content)}</${item.tag}>`
   }
   return `${head} />`
 }
@@ -206,7 +206,7 @@ export function memoriesSection(memories: Memory[], truncWords: number): HudSect
     items: memories.map((m) => ({
       tag: "memory",
       attrs: { id: `mem_${m.id}`, category: m.category },
-      content: truncate(m.text, truncWords),
+      content: formatTruncated(m.text, truncWords),
     })),
   }
 }

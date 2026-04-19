@@ -9,28 +9,28 @@ from codemira.store.db import (
     init_schema,
     open_db,
     insert_memory,
-    get_memory,
-    get_all_memories,
+    read_memory,
+    read_all_memories,
     update_memory,
     delete_memory,
     archive_memory,
-    increment_access,
+    update_access_counts,
     insert_entity,
-    get_or_create_entity,
+    upsert_entity,
     link_memory_entity,
-    get_entities_for_memory,
-    get_memories_by_entity,
+    read_entities_for_memory,
+    read_memories_by_entity,
     insert_memory_link,
-    get_linked_memories,
+    read_linked_memories,
     log_extraction,
     is_session_extracted,
-    get_existing_memory_texts,
-    embedding_to_blob,
-    blob_to_embedding,
-    generate_memory_id,
+    read_active_memory_texts,
+    format_embedding_blob,
+    parse_embedding_blob,
+    build_memory_id,
     upsert_arc_fragment,
-    get_arc_fragments,
-    get_arc,
+    read_arc_fragments,
+    read_arc,
     delete_arc_fragments_from,
     VALID_CATEGORIES,
 )
@@ -50,8 +50,8 @@ class TestHelpers:
         assert result == [{"name": "a"}, {"name": "b"}]
 
     def test_now_returns_iso_with_utc_offset(self):
-        from codemira.store.db import _now
-        ts = _now()
+        from codemira.store.db import _now_iso
+        ts = _now_iso()
         assert "+00:00" in ts
 
 
@@ -127,7 +127,7 @@ class TestMemoryCRUD:
     def test_insert_and_get(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Prefers threading over asyncio", "rejected_alternative", emb, "ses_123")
-        mem = get_memory(memory_db, mid)
+        mem = read_memory(memory_db, mid)
         assert mem is not None
         assert mem["text"] == "Prefers threading over asyncio"
         assert mem["category"] == "rejected_alternative"
@@ -139,17 +139,17 @@ class TestMemoryCRUD:
     def test_insert_without_session(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Some memory", "priority", emb)
-        mem = get_memory(memory_db, mid)
+        mem = read_memory(memory_db, mid)
         assert mem["source_session_id"] is None
 
     def test_get_nonexistent(self, memory_db):
-        assert get_memory(memory_db, "nonexistent") is None
+        assert read_memory(memory_db, "nonexistent") is None
 
-    def test_get_all_memories(self, memory_db):
+    def test_read_all_memories(self, memory_db):
         emb = _make_embedding()
         insert_memory(memory_db, "Memory 1", "priority", emb)
         insert_memory(memory_db, "Memory 2", "decision_rationale", emb)
-        all_mems = get_all_memories(memory_db)
+        all_mems = read_all_memories(memory_db)
         assert len(all_mems) == 2
 
     def test_get_all_excludes_archived(self, memory_db):
@@ -157,7 +157,7 @@ class TestMemoryCRUD:
         mid = insert_memory(memory_db, "Memory 1", "priority", emb)
         insert_memory(memory_db, "Memory 2", "decision_rationale", emb)
         archive_memory(memory_db, mid)
-        active = get_all_memories(memory_db)
+        active = read_all_memories(memory_db)
         assert len(active) == 1
         assert active[0]["text"] == "Memory 2"
 
@@ -165,14 +165,14 @@ class TestMemoryCRUD:
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Memory 1", "priority", emb)
         archive_memory(memory_db, mid)
-        all_mems = get_all_memories(memory_db, include_archived=True)
+        all_mems = read_all_memories(memory_db, include_archived=True)
         assert len(all_mems) == 1
 
     def test_update_memory_text(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Original", "priority", emb)
         update_memory(memory_db, mid, text="Updated")
-        mem = get_memory(memory_db, mid)
+        mem = read_memory(memory_db, mid)
         assert mem["text"] == "Updated"
 
     def test_update_memory_disallowed_field(self, memory_db):
@@ -190,7 +190,7 @@ class TestMemoryCRUD:
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Memory", "priority", emb)
         assert delete_memory(memory_db, mid) is True
-        assert get_memory(memory_db, mid) is None
+        assert read_memory(memory_db, mid) is None
 
     def test_delete_nonexistent_memory(self, memory_db):
         emb = _make_embedding()
@@ -200,25 +200,25 @@ class TestMemoryCRUD:
     def test_delete_memory_cascades_entities(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Memory", "priority", emb)
-        eid = get_or_create_entity(memory_db, "pytest", "tool")
+        eid = upsert_entity(memory_db, "pytest", "tool")
         link_memory_entity(memory_db, mid, eid)
         delete_memory(memory_db, mid)
-        entities = get_entities_for_memory(memory_db, mid)
+        entities = read_entities_for_memory(memory_db, mid)
         assert len(entities) == 0
 
     def test_archive_memory(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Memory", "priority", emb)
         archive_memory(memory_db, mid)
-        mem = get_memory(memory_db, mid)
+        mem = read_memory(memory_db, mid)
         assert mem["is_archived"] == 1
         assert mem["archived_at"] is not None
 
-    def test_increment_access(self, memory_db):
+    def test_update_access_counts(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Memory", "priority", emb)
-        increment_access(memory_db, [mid])
-        mem = get_memory(memory_db, mid)
+        update_access_counts(memory_db, [mid])
+        mem = read_memory(memory_db, mid)
         assert mem["access_count"] == 1
         assert mem["last_accessed_at"] is not None
 
@@ -226,9 +226,9 @@ class TestMemoryCRUD:
         emb = _make_embedding()
         mid1 = insert_memory(memory_db, "Memory 1", "priority", emb)
         mid2 = insert_memory(memory_db, "Memory 2", "priority", emb)
-        increment_access(memory_db, [mid1, mid2])
-        m1 = get_memory(memory_db, mid1)
-        m2 = get_memory(memory_db, mid2)
+        update_access_counts(memory_db, [mid1, mid2])
+        m1 = read_memory(memory_db, mid1)
+        m2 = read_memory(memory_db, mid2)
         assert m1["access_count"] == 1
         assert m2["access_count"] == 1
 
@@ -241,7 +241,7 @@ class TestEntities:
         assert row["type"] == "tool"
 
     def test_get_or_create_new(self, memory_db):
-        eid = get_or_create_entity(memory_db, "fastapi", "framework")
+        eid = upsert_entity(memory_db, "fastapi", "framework")
         assert eid is not None
         row = memory_db.execute("SELECT * FROM entities WHERE id = ?", (eid,)).fetchone()
         assert row["name"] == "fastapi"
@@ -250,25 +250,25 @@ class TestEntities:
         assert row["name"] == "fastapi"
 
     def test_get_or_create_existing(self, memory_db):
-        eid1 = get_or_create_entity(memory_db, "pytest", "tool")
-        eid2 = get_or_create_entity(memory_db, "pytest", "tool")
+        eid1 = upsert_entity(memory_db, "pytest", "tool")
+        eid2 = upsert_entity(memory_db, "pytest", "tool")
         assert eid1 == eid2
 
     def test_link_memory_entity(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Memory", "priority", emb)
-        eid = get_or_create_entity(memory_db, "docker", "tool")
+        eid = upsert_entity(memory_db, "docker", "tool")
         link_memory_entity(memory_db, mid, eid)
-        entities = get_entities_for_memory(memory_db, mid)
+        entities = read_entities_for_memory(memory_db, mid)
         assert len(entities) == 1
         assert entities[0]["name"] == "docker"
 
-    def test_get_memories_by_entity(self, memory_db):
+    def test_read_memories_by_entity(self, memory_db):
         emb = _make_embedding()
         mid = insert_memory(memory_db, "Uses Docker for deployment", "decision_rationale", emb)
-        eid = get_or_create_entity(memory_db, "docker", "tool")
+        eid = upsert_entity(memory_db, "docker", "tool")
         link_memory_entity(memory_db, mid, eid)
-        mems = get_memories_by_entity(memory_db, "docker")
+        mems = read_memories_by_entity(memory_db, "docker")
         assert len(mems) == 1
         assert mems[0]["text"] == "Uses Docker for deployment"
 
@@ -279,7 +279,7 @@ class TestMemoryLinks:
         mid1 = insert_memory(memory_db, "Memory 1", "priority", emb)
         mid2 = insert_memory(memory_db, "Memory 2", "priority", emb)
         insert_memory_link(memory_db, mid1, mid2, "corroborates", "Same preference")
-        linked = get_linked_memories(memory_db, mid1)
+        linked = read_linked_memories(memory_db, mid1)
         assert len(linked) == 1
         assert linked[0]["link_type"] == "corroborates"
 
@@ -289,7 +289,7 @@ class TestMemoryLinks:
         mid2 = insert_memory(memory_db, "Memory 2", "priority", emb)
         insert_memory_link(memory_db, mid1, mid2, "corroborates")
         insert_memory_link(memory_db, mid1, mid2, "corroborates")
-        linked = get_linked_memories(memory_db, mid1)
+        linked = read_linked_memories(memory_db, mid1)
         assert len(linked) == 1
 
 
@@ -333,17 +333,17 @@ class TestFTS5Sync:
 
 
 class TestEmbeddingConversion:
-    def test_embedding_to_blob_roundtrip(self):
+    def test_format_embedding_blob_roundtrip(self):
         emb = [0.1, 0.2, 0.3, 0.4]
-        blob = embedding_to_blob(emb)
-        result = blob_to_embedding(blob)
+        blob = format_embedding_blob(emb)
+        result = parse_embedding_blob(blob)
         assert len(result) == 4
         for a, b in zip(emb, result):
             assert abs(a - b) < 1e-6
 
-    def test_generate_memory_id(self):
-        id1 = generate_memory_id()
-        id2 = generate_memory_id()
+    def test_build_memory_id(self):
+        id1 = build_memory_id()
+        id2 = build_memory_id()
         assert len(id1) == 8
         assert id1 != id2
 
@@ -353,7 +353,7 @@ class TestGetExistingMemoryTexts:
         emb = _make_embedding()
         insert_memory(memory_db, "Memory A", "priority", emb)
         insert_memory(memory_db, "Memory B", "priority", emb)
-        texts = get_existing_memory_texts(memory_db)
+        texts = read_active_memory_texts(memory_db)
         assert "Memory A" in texts
         assert "Memory B" in texts
 
@@ -362,7 +362,7 @@ class TestGetExistingMemoryTexts:
         mid = insert_memory(memory_db, "Archived memory", "priority", emb)
         insert_memory(memory_db, "Active memory", "priority", emb)
         archive_memory(memory_db, mid)
-        texts = get_existing_memory_texts(memory_db)
+        texts = read_active_memory_texts(memory_db)
         assert "Archived memory" not in texts
         assert "Active memory" in texts
 
@@ -371,26 +371,26 @@ class TestArcFragments:
     def test_upsert_and_get(self, memory_db):
         upsert_arc_fragment(memory_db, "ses_abc", 0, "[START] Goal: Fix bug", "abc123", 10)
         upsert_arc_fragment(memory_db, "ses_abc", 1, " └─ [CURRENT] Editing file", "def456", 10)
-        arc_record = get_arc(memory_db, "ses_abc")
+        arc_record = read_arc(memory_db, "ses_abc")
         assert arc_record is not None
         assert arc_record["arc"] == "[START] Goal: Fix bug\n └─ [CURRENT] Editing file"
         assert arc_record["message_count"] == 10
         assert arc_record["generated_at"] is not None
 
     def test_get_nonexistent(self, memory_db):
-        assert get_arc(memory_db, "ses_nonexistent") is None
+        assert read_arc(memory_db, "ses_nonexistent") is None
 
     def test_upsert_overwrites_fragment(self, memory_db):
         upsert_arc_fragment(memory_db, "ses_abc", 0, "[START] Old fragment", "oldhash", 5)
         upsert_arc_fragment(memory_db, "ses_abc", 0, "[START] New fragment", "newhash", 12)
-        arc_record = get_arc(memory_db, "ses_abc")
+        arc_record = read_arc(memory_db, "ses_abc")
         assert arc_record["arc"] == "[START] New fragment"
         assert arc_record["message_count"] == 12
 
     def test_get_fragments(self, memory_db):
         upsert_arc_fragment(memory_db, "ses_abc", 0, "fragment0", "h0", 10)
         upsert_arc_fragment(memory_db, "ses_abc", 1, "fragment1", "h1", 10)
-        fragments = get_arc_fragments(memory_db, "ses_abc")
+        fragments = read_arc_fragments(memory_db, "ses_abc")
         assert len(fragments) == 2
         assert fragments[0]["fragment_index"] == 0
         assert fragments[0]["content_hash"] == "h0"
@@ -401,7 +401,7 @@ class TestArcFragments:
         upsert_arc_fragment(memory_db, "ses_abc", 1, "frag1", "h1", 10)
         upsert_arc_fragment(memory_db, "ses_abc", 2, "frag2", "h2", 10)
         delete_arc_fragments_from(memory_db, "ses_abc", 1)
-        arc_record = get_arc(memory_db, "ses_abc")
+        arc_record = read_arc(memory_db, "ses_abc")
         assert arc_record["arc"] == "frag0"
-        fragments = get_arc_fragments(memory_db, "ses_abc")
+        fragments = read_arc_fragments(memory_db, "ses_abc")
         assert len(fragments) == 1

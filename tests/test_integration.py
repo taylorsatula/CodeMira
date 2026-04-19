@@ -167,7 +167,7 @@ def opencode_setup():
 
 class TestFindIdleSessions:
     def test_finds_idle_unextracted_session(self, opencode_setup):
-        from codemira.opencode_db import find_idle_sessions
+        from codemira.opencode_db import read_idle_sessions
         opencode_conn, memory_conn, _, _ = opencode_setup
         old_ts = int((time.time() - 120) * 1000)
         _insert_session(opencode_conn, "ses_idle_1", old_ts)
@@ -181,37 +181,37 @@ class TestFindIdleSessions:
             opencode_conn, "asst_2", "ses_idle_1", "Done!",
             "read", {"path": "file1.txt"}, "contents of file1", old_ts + 300,
         )
-        sessions = find_idle_sessions(opencode_conn, set(), idle_threshold_minutes=1, min_messages=4)
+        sessions = read_idle_sessions(opencode_conn, set(), idle_threshold_minutes=1, min_messages=4)
         assert len(sessions) == 1
         assert sessions[0]["id"] == "ses_idle_1"
 
     def test_extracts_already_extracted_sessions(self, opencode_setup):
-        from codemira.opencode_db import find_idle_sessions
+        from codemira.opencode_db import read_idle_sessions
         opencode_conn, memory_conn, _, _ = opencode_setup
         old_ts = int((time.time() - 120) * 1000)
         _insert_session(opencode_conn, "ses_extracted", old_ts)
         for i in range(4):
             _insert_user_message(opencode_conn, f"msg_ext_{i}", "ses_extracted", f"Message {i}", old_ts + i * 100)
-        sessions = find_idle_sessions(opencode_conn, {"ses_extracted"}, idle_threshold_minutes=1, min_messages=4)
+        sessions = read_idle_sessions(opencode_conn, {"ses_extracted"}, idle_threshold_minutes=1, min_messages=4)
         assert len(sessions) == 0
 
     def test_excludes_recent_sessions(self, opencode_setup):
-        from codemira.opencode_db import find_idle_sessions
+        from codemira.opencode_db import read_idle_sessions
         opencode_conn, memory_conn, _, _ = opencode_setup
         recent_ts = int(time.time() * 1000)
         _insert_session(opencode_conn, "ses_recent", recent_ts)
         for i in range(4):
             _insert_user_message(opencode_conn, f"msg_rec_{i}", "ses_recent", f"Message {i}", recent_ts + i * 100)
-        sessions = find_idle_sessions(opencode_conn, set(), idle_threshold_minutes=60, min_messages=4)
+        sessions = read_idle_sessions(opencode_conn, set(), idle_threshold_minutes=60, min_messages=4)
         assert len(sessions) == 0
 
     def test_excludes_sessions_below_min_messages(self, opencode_setup):
-        from codemira.opencode_db import find_idle_sessions
+        from codemira.opencode_db import read_idle_sessions
         opencode_conn, memory_conn, _, _ = opencode_setup
         old_ts = int((time.time() - 120) * 1000)
         _insert_session(opencode_conn, "ses_sparse", old_ts)
         _insert_user_message(opencode_conn, "msg_sparse_1", "ses_sparse", "Hello", old_ts)
-        sessions = find_idle_sessions(opencode_conn, set(), idle_threshold_minutes=1, min_messages=4)
+        sessions = read_idle_sessions(opencode_conn, set(), idle_threshold_minutes=1, min_messages=4)
         assert len(sessions) == 0
 
 
@@ -270,12 +270,12 @@ class TestReadSessionConversation:
 
 class TestDiscoverOpencodeDb:
     def test_uses_override(self, opencode_setup):
-        from codemira.opencode_db import discover_opencode_db
+        from codemira.opencode_db import pick_opencode_db_path
         _, _, tmpdir, opencode_db_path = opencode_setup
-        assert discover_opencode_db(opencode_db_path) == opencode_db_path
+        assert pick_opencode_db_path(opencode_db_path) == opencode_db_path
 
     def test_uses_env_var(self, opencode_setup):
-        from codemira.opencode_db import discover_opencode_db
+        from codemira.opencode_db import pick_opencode_db_path
         _, _, tmpdir, _ = opencode_setup
         fake_path = os.path.join(tmpdir, "env.db")
         with open(fake_path, "w") as f:
@@ -283,7 +283,7 @@ class TestDiscoverOpencodeDb:
         old_env = os.environ.get("OPENCODE_DB")
         try:
             os.environ["OPENCODE_DB"] = fake_path
-            assert discover_opencode_db(None) == fake_path
+            assert pick_opencode_db_path(None) == fake_path
         finally:
             if old_env is not None:
                 os.environ["OPENCODE_DB"] = old_env
@@ -291,12 +291,12 @@ class TestDiscoverOpencodeDb:
                 os.environ.pop("OPENCODE_DB", None)
 
     def test_override_takes_precedence_over_env(self, opencode_setup):
-        from codemira.opencode_db import discover_opencode_db
+        from codemira.opencode_db import pick_opencode_db_path
         _, _, tmpdir, opencode_db_path = opencode_setup
         old_env = os.environ.get("OPENCODE_DB")
         try:
             os.environ["OPENCODE_DB"] = "/nonexistent"
-            assert discover_opencode_db(opencode_db_path) == opencode_db_path
+            assert pick_opencode_db_path(opencode_db_path) == opencode_db_path
         finally:
             if old_env is not None:
                 os.environ["OPENCODE_DB"] = old_env
@@ -304,11 +304,11 @@ class TestDiscoverOpencodeDb:
                 os.environ.pop("OPENCODE_DB", None)
 
     def test_raises_when_no_real_db_and_no_env(self, monkeypatch):
-        from codemira.opencode_db import discover_opencode_db, MACOS_DB_PATH, LINUX_DB_PATH
+        from codemira.opencode_db import pick_opencode_db_path, MACOS_DB_PATH, LINUX_DB_PATH
         monkeypatch.delenv("OPENCODE_DB", raising=False)
         if not os.path.exists(MACOS_DB_PATH) and not os.path.exists(LINUX_DB_PATH):
             with pytest.raises(FileNotFoundError, match="Cannot find OpenCode database"):
-                discover_opencode_db("/nonexistent/path/opencode.db")
+                pick_opencode_db_path("/nonexistent/path/opencode.db")
         else:
             pytest.skip("Real OpenCode DB exists on this machine")
 
@@ -334,7 +334,7 @@ class TestDaemonStartup:
         _, _, tmpdir, _ = opencode_setup
         from codemira.config import DaemonConfig
         from codemira.store.manager import StoreManager
-        from codemira.store.db import insert_memory, get_all_memories
+        from codemira.store.db import insert_memory, read_all_memories
         proj_a = os.path.join(tmpdir, "proj_a")
         proj_b = os.path.join(tmpdir, "proj_b")
         os.makedirs(proj_a, exist_ok=True)
@@ -344,8 +344,8 @@ class TestDaemonStartup:
         conn_b = manager.get(proj_b).conn
         insert_memory(conn_a, "proj A memory", "priority", _make_embedding(seed=1))
         insert_memory(conn_b, "proj B memory", "priority", _make_embedding(seed=2))
-        a_mems = [m["text"] for m in get_all_memories(conn_a)]
-        b_mems = [m["text"] for m in get_all_memories(conn_b)]
+        a_mems = [m["text"] for m in read_all_memories(conn_a)]
+        b_mems = [m["text"] for m in read_all_memories(conn_b)]
         assert a_mems == ["proj A memory"]
         assert b_mems == ["proj B memory"]
         manager.close_all()
@@ -377,9 +377,9 @@ class TestExtractionToRetrievalPipeline:
     @skip_no_local_llm
     def test_store_extracted_memory_then_retrieve(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
-        from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity
+        from codemira.store.db import insert_memory, upsert_entity, link_memory_entity
         from codemira.store.index import MemoryIndex
-        from codemira.retrieval.proactive import retrieve
+        from codemira.retrieval.proactive import collect_ranked_memories
         from codemira.config import DaemonConfig
         from codemira.extraction.dedup import extract_entities
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -389,13 +389,13 @@ class TestExtractionToRetrievalPipeline:
             "Uses FastAPI for REST endpoints", ENTITY_MODEL, LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir,
         )
         for entity in entities:
-            eid = get_or_create_entity(memory_conn, entity["name"], entity["type"])
+            eid = upsert_entity(memory_conn, entity["name"], entity["type"])
             link_memory_entity(memory_conn, mid, eid)
         index_path = os.path.join(tmpdir, "memories.index")
         mi = MemoryIndex(os.path.join(tmpdir, "memories.db"), index_path)
         mi.build_from_db(memory_conn)
         config = DaemonConfig()
-        results = retrieve(
+        results = collect_ranked_memories(
             query_expansion="FastAPI REST API",
             entities=["fastapi"],
             pinned_memory_ids=[],
@@ -411,15 +411,15 @@ class TestExtractionToRetrievalPipeline:
 
     def test_store_multiple_and_retrieve_with_hub(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
-        from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity, insert_memory_link
+        from codemira.store.db import insert_memory, upsert_entity, link_memory_entity, insert_memory_link
         from codemira.store.index import MemoryIndex
-        from codemira.retrieval.proactive import retrieve
+        from codemira.retrieval.proactive import collect_ranked_memories
         from codemira.config import DaemonConfig
         embs = _make_embeddings(3)
         mid1 = insert_memory(memory_conn, "Uses FastAPI for backend", "decision_rationale", embs[0], "ses_a")
         mid2 = insert_memory(memory_conn, "Prefers FastAPI over Flask", "rejected_alternative", embs[1], "ses_a")
         mid3 = insert_memory(memory_conn, "Deploy with Docker on AWS", "priority", embs[2], "ses_a")
-        eid = get_or_create_entity(memory_conn, "fastapi", "framework")
+        eid = upsert_entity(memory_conn, "fastapi", "framework")
         link_memory_entity(memory_conn, mid1, eid)
         link_memory_entity(memory_conn, mid2, eid)
         insert_memory_link(memory_conn, mid1, mid2, "corroborates", "Same framework choice")
@@ -428,7 +428,7 @@ class TestExtractionToRetrievalPipeline:
         mi.build_from_db(memory_conn)
         config = DaemonConfig()
         config.max_surfaced_memories = 8
-        results = retrieve(
+        results = collect_ranked_memories(
             query_expansion="FastAPI framework",
             entities=["fastapi"],
             pinned_memory_ids=[mid1],
@@ -515,7 +515,7 @@ class TestDedupDuringStore:
 class TestEntityExtractionAndLinking:
     def test_extract_and_link_entities_roundtrip(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
-        from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity, get_entities_for_memory, get_memories_by_entity
+        from codemira.store.db import insert_memory, upsert_entity, link_memory_entity, read_entities_for_memory, read_memories_by_entity
         from codemira.extraction.dedup import extract_entities
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
         text = "Uses FastAPI with Docker for deployment and pytest for testing"
@@ -525,13 +525,13 @@ class TestEntityExtractionAndLinking:
         entity_names = {e["name"] for e in entities}
         assert entity_names & {"fastapi", "docker", "pytest"}, f"Expected at least one of fastapi/docker/pytest, got {entity_names}"
         for entity in entities:
-            eid = get_or_create_entity(memory_conn, entity["name"], entity["type"])
+            eid = upsert_entity(memory_conn, entity["name"], entity["type"])
             link_memory_entity(memory_conn, mid, eid)
-        linked = get_entities_for_memory(memory_conn, mid)
+        linked = read_entities_for_memory(memory_conn, mid)
         linked_names = {e["name"] for e in linked}
         assert linked_names == entity_names
         if "fastapi" in entity_names:
-            fastapi_mems = get_memories_by_entity(memory_conn, "fastapi")
+            fastapi_mems = read_memories_by_entity(memory_conn, "fastapi")
             assert len(fastapi_mems) == 1
             assert fastapi_mems[0]["id"] == mid
 
@@ -578,7 +578,7 @@ class TestToolCompression:
             call_llm("nonexistent-model-xyz", "system", "user", LOCAL_BASE_URL, LOCAL_API_KEY)
 
     def test_tool_compressor_produces_transcript(self, opencode_setup):
-        from codemira.extraction.compressor import tool_compressor
+        from codemira.extraction.compressor import build_tool_compressor
         from codemira.extraction.transcript import iter_turns, render_transcript
         opencode_conn, _, _, _ = opencode_setup
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -591,7 +591,7 @@ class TestToolCompression:
         )
         from codemira.opencode_db import read_session_conversation
         conversation = read_session_conversation(opencode_conn, "ses_comp_1")
-        compressor = tool_compressor("gemma4:e2b", LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir)
+        compressor = build_tool_compressor("gemma4:e2b", LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir)
         result = render_transcript(iter_turns(conversation), compressor)
         assert len(result.strip()) > 0
         assert "fastapi" in result.lower(), f"Compressed transcript should mention fastapi, got: {result!r}"
@@ -688,7 +688,7 @@ class TestExtractionRemote:
 class TestFullExtractionPipeline:
     def test_compress_then_extract_stores_memories(self, opencode_setup):
         _, memory_conn, tmpdir, _ = opencode_setup
-        from codemira.extraction.compressor import tool_compressor
+        from codemira.extraction.compressor import build_tool_compressor
         from codemira.extraction.transcript import iter_turns, render_transcript
         from codemira.opencode_db import read_session_conversation
         prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -712,7 +712,7 @@ class TestFullExtractionPipeline:
         conversation = read_session_conversation(opencode_conn, "ses_full_1")
         assert len(conversation) == 5, f"Expected 5 messages (2 user + 3 assistant), got {len(conversation)}"
         assert [m["role"] for m in conversation] == ["user", "assistant", "assistant", "user", "assistant"]
-        compressor = tool_compressor("gemma4:e2b", LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir)
+        compressor = build_tool_compressor("gemma4:e2b", LOCAL_BASE_URL, LOCAL_API_KEY, prompts_dir)
         compressed = render_transcript(iter_turns(conversation), compressor)
         assert len(compressed.strip()) > 0
         domain_terms = {"fastapi", "docker", "pytest"}

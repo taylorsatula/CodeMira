@@ -13,7 +13,7 @@ class SearchResult:
     category: str
 
 
-def sanitize_fts_query(query: str) -> str:
+def build_fts_query(query: str) -> str:
     tokens = re.findall(r"\w+", query)
     if not tokens:
         return ""
@@ -24,7 +24,7 @@ class HybridSearcher:
     RRF_K = 60
 
     def bm25_search(self, query: str, limit: int, conn: sqlite3.Connection) -> list[SearchResult]:
-        fts_query = sanitize_fts_query(query)
+        fts_query = build_fts_query(query)
         if not fts_query:
             return []
         cursor = conn.execute(

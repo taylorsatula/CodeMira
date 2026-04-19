@@ -73,7 +73,7 @@ class TestRenderTranscript:
 
 class TestPrefixesMatchChunkerContract:
     def test_user_prefix_used_by_chunker(self):
-        from codemira.extraction.chunker import split_into_turns
+        from codemira.extraction.chunker import parse_turns
         transcript = f"{USER_PREFIX} a\n{ASSISTANT_PREFIX} b\n{USER_PREFIX} c"
-        turns = split_into_turns(transcript)
+        turns = parse_turns(transcript)
         assert len(turns) == 2

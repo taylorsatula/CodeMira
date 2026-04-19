@@ -1,4 +1,4 @@
-from codemira.summarization.arc import _format_raw_transcript, split_into_turns, _chunk_transcript
+from codemira.summarization.arc import _format_raw_transcript, parse_turns, _build_arc_chunks
 
 
 class TestFormatRawTranscript:
@@ -41,29 +41,29 @@ class TestFormatRawTranscript:
 
 class TestSplitIntoTurns:
     def test_single_turn(self):
-        assert split_into_turns("User: hello\nAssistant: hi") == ["User: hello\nAssistant: hi"]
+        assert parse_turns("User: hello\nAssistant: hi") == ["User: hello\nAssistant: hi"]
 
     def test_two_turns(self):
         transcript = "User: hello\nAssistant: hi\nUser: fix it\nAssistant: done"
-        turns = split_into_turns(transcript)
+        turns = parse_turns(transcript)
         assert len(turns) == 2
 
     def test_empty(self):
-        assert split_into_turns("") == []
+        assert parse_turns("") == []
 
     def test_whitespace_only(self):
-        assert split_into_turns("  \n  ") == []
+        assert parse_turns("  \n  ") == []
 
 
 class TestChunkTranscript:
     def test_short_returns_single(self):
         transcript = "User: hello\nAssistant: hi"
-        assert _chunk_transcript(transcript, 128000, 30_000) == [transcript]
+        assert _build_arc_chunks(transcript, 128000, 30_000) == [transcript]
 
     def test_splits_long_transcript(self):
         turn = "User: " + "x" * 8000 + "\nAssistant: reply"
         transcript = "\n\n".join([turn] * 50)
-        chunks = _chunk_transcript(transcript, 32000, 30_000)
+        chunks = _build_arc_chunks(transcript, 32000, 30_000)
         assert len(chunks) > 1
         for chunk in chunks:
             assert chunk.startswith("User:")

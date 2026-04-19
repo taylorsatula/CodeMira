@@ -15,7 +15,7 @@ import {
   type DaemonResult,
 } from "./pure.ts"
 
-function generateOpencodeId(prefix: "msg" | "prt"): string {
+function buildOpenCodeId(prefix: "msg" | "prt"): string {
   return `${prefix}_${randomBytes(13).toString("hex")}`
 }
 
@@ -101,7 +101,7 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
   const subcorticalSystemPrompt = readFileSync(join(promptsDir, "subcortical_system.txt"), "utf-8")
   const subcorticalUserTemplate = readFileSync(join(promptsDir, "subcortical_user.txt"), "utf-8")
 
-  function trackHealth<T>(result: DaemonResult<T>): DaemonResult<T> {
+  function updateHealthStatus<T>(result: DaemonResult<T>): DaemonResult<T> {
     if ("error" in result && (result.error === "down" || result.error === "timeout")) {
       daemonUnavailable = true
     } else if ("ok" in result) {
@@ -141,7 +141,7 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
           )
         }
 
-        const arcResult = trackHealth(
+        const arcResult = updateHealthStatus(
           await daemonCall<{ arc: string | null }>(
             config.daemonUrl, "GET",
             `/arc?session_id=${encodeURIComponent(sessionID)}&project_root=${encodeURIComponent(projectRoot)}`,
@@ -182,7 +182,7 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
 
         const pinnedIds = keep.length > 0 ? keep : pinnedMemories.map((m) => m.id)
 
-        const retrieveResult = trackHealth(
+        const retrieveResult = updateHealthStatus(
           await daemonCall<{ memories: Memory[]; degraded: boolean }>(
             config.daemonUrl, "POST", "/retrieve",
             {
@@ -212,8 +212,8 @@ const plugin: (input: PluginInput, options?: PluginOptions) => Promise<Hooks> = 
         const agent = lastMsg?.info?.agent || "code"
         const model = lastMsg?.info?.model || { providerID: "anthropic", modelID: "claude-sonnet-4-20250514" }
 
-        const hudMsgId = generateOpencodeId("msg")
-        const hudPartId = generateOpencodeId("prt")
+        const hudMsgId = buildOpenCodeId("msg")
+        const hudPartId = buildOpenCodeId("prt")
 
         output.messages.push({
           info: {

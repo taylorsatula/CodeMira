@@ -1,13 +1,13 @@
 import sqlite3
 
 from codemira.config import DaemonConfig
-from codemira.store.db import increment_access, get_memory, dedupe_by
+from codemira.store.db import update_access_counts, read_memory, dedupe_by
 from codemira.store.index import MemoryIndex
 from codemira.store.search import HybridSearcher
-from codemira.retrieval.hub_discovery import hub_discovery
+from codemira.retrieval.hubs import collect_hub_memories
 
 
-def retrieve(
+def collect_ranked_memories(
     query_expansion: str,
     entities: list[str],
     pinned_memory_ids: list[str],
@@ -29,16 +29,16 @@ def retrieve(
     )
     fresh_memories: list[dict] = []
     for r in fresh_results:
-        mem = get_memory(conn, r.memory_id)
+        mem = read_memory(conn, r.memory_id)
         if mem is not None:
             fresh_memories.append(mem)
     fresh_ids = {m["id"] for m in fresh_memories}
 
-    hub_memories = hub_discovery(conn, entities, list(fresh_ids))
+    hub_memories = collect_hub_memories(conn, entities, list(fresh_ids))
 
     retained_pinned: list[dict] = []
     for pid in pinned_memory_ids:
-        mem = get_memory(conn, pid)
+        mem = read_memory(conn, pid)
         if mem is not None and mem["is_archived"] == 0:
             retained_pinned.append(mem)
 
@@ -47,6 +47,6 @@ def retrieve(
 
     surfaced_ids = [m["id"] for m in combined]
     if surfaced_ids:
-        increment_access(conn, surfaced_ids)
+        update_access_counts(conn, surfaced_ids)
 
     return combined

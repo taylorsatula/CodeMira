@@ -50,14 +50,14 @@ class TestIsDuplicateVectorContract:
 
 class TestPackTurnsIntoChunks:
     def test_short_returns_single(self):
-        from codemira.extraction.chunker import pack_turns_into_chunks
-        assert pack_turns_into_chunks("User: hi\nAssistant: hello", 1024) == ["User: hi\nAssistant: hello"]
+        from codemira.extraction.chunker import build_chunks
+        assert build_chunks("User: hi\nAssistant: hello", 1024) == ["User: hi\nAssistant: hello"]
 
     def test_splits_at_user_boundaries(self):
-        from codemira.extraction.chunker import pack_turns_into_chunks
+        from codemira.extraction.chunker import build_chunks
         turn = "User: " + "x" * 4000 + "\nAssistant: reply"
         transcript = "\n\n".join([turn] * 10)
-        chunks = pack_turns_into_chunks(transcript, 2000)
+        chunks = build_chunks(transcript, 2000)
         assert len(chunks) > 1
         for c in chunks:
             assert c.startswith("User:")

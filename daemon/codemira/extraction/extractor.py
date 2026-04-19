@@ -5,7 +5,7 @@ import os
 
 from codemira.errors import ExtractionError
 from codemira.llm import call_llm
-from codemira.store.db import get_existing_memory_texts, VALID_CATEGORIES
+from codemira.store.db import read_active_memory_texts, VALID_CATEGORIES
 from codemira.extraction.dedup import is_duplicate_text
 
 
@@ -67,12 +67,12 @@ def extract_memories(
 ) -> list[dict]:
     system_template = load_prompt("extraction_system", prompts_dir)
 
-    from codemira.store.db import get_arc
-    arc_record = get_arc(conn, session_id)
+    from codemira.store.db import read_arc
+    arc_record = read_arc(conn, session_id)
     conversation_arc = arc_record["arc"] if arc_record else "No arc available"
     system_prompt = system_template.render(conversation_arc=conversation_arc)
 
-    existing_texts = get_existing_memory_texts(conn)
+    existing_texts = read_active_memory_texts(conn)
     existing_str, combined_texts = _build_existing_memories_str(existing_texts, prior_chunk_texts)
     user_prompt = load_prompt("extraction_user", prompts_dir).render(
         compressed_transcript=compressed_transcript,

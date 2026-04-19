@@ -2,7 +2,7 @@ import json
 import logging
 import sqlite3
 
-from codemira.store.db import archive_memory, insert_memory, get_or_create_entity, link_memory_entity, get_entities_for_memory
+from codemira.store.db import archive_memory, insert_memory, upsert_entity, link_memory_entity, read_entities_for_memory
 from codemira.store.index import MemoryIndex
 from codemira.llm import call_llm
 from codemira.extraction.extractor import load_prompt
@@ -19,10 +19,10 @@ def consolidate_cluster(
     api_key: str,
     prompts_dir: str,
 ) -> str | None:
-    from codemira.store.db import get_memory
+    from codemira.store.db import read_memory
     memories = []
     for mid in cluster:
-        mem = get_memory(conn, mid)
+        mem = read_memory(conn, mid)
         if mem is not None:
             memories.append(mem)
     if len(memories) < 2:
@@ -54,13 +54,13 @@ def consolidate_cluster(
     category = memories[0]["category"]
     all_entities = set()
     for m in memories:
-        for e in get_entities_for_memory(conn, m["id"]):
+        for e in read_entities_for_memory(conn, m["id"]):
             all_entities.add((e["name"], e["type"]))
     from codemira.embeddings import EmbeddingsProvider
     consolidated_embedding = EmbeddingsProvider.get().encode_deep([consolidated_text])[0]
     new_mid = insert_memory(conn, consolidated_text, category, consolidated_embedding)
     for name, etype in all_entities:
-        eid = get_or_create_entity(conn, name, etype)
+        eid = upsert_entity(conn, name, etype)
         link_memory_entity(conn, new_mid, eid)
     for mid in cluster:
         archive_memory(conn, mid)
@@ -76,8 +76,8 @@ def run_consolidation(
     api_key: str,
     prompts_dir: str,
 ) -> list[str]:
-    from codemira.consolidation.cluster import find_clusters
-    clusters = find_clusters(conn, index, similarity_threshold)
+    from codemira.consolidation.cluster import build_clusters
+    clusters = build_clusters(conn, index, similarity_threshold)
     new_ids = []
     for cluster in clusters:
         new_mid = consolidate_cluster(cluster, conn, index, model, base_url, api_key, prompts_dir)

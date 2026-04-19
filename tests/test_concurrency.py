@@ -27,7 +27,7 @@ def _insert_with_lock(store, text, category, emb, session_id):
 
 class TestConcurrentInserts:
     def test_two_threads_insert_simultaneously(self, store):
-        from codemira.store.db import get_all_memories
+        from codemira.store.db import read_all_memories
         embs = _make_embeddings(20)
         results: list[str] = []
         results_lock = threading.Lock()
@@ -53,11 +53,11 @@ class TestConcurrentInserts:
         assert errors == [], f"Concurrent inserts raised: {errors}"
         assert len(results) == 20
         with store.lock:
-            mems = get_all_memories(store.conn)
+            mems = read_all_memories(store.conn)
         assert len(mems) == 20
 
     def test_concurrent_read_while_writing(self, store):
-        from codemira.store.db import insert_memory, get_all_memories
+        from codemira.store.db import insert_memory, read_all_memories
         emb = _make_embeddings(1)[0]
         with store.lock:
             insert_memory(store.conn, "seed memory", "priority", emb, "ses_seed")
@@ -81,7 +81,7 @@ class TestConcurrentInserts:
             try:
                 while not write_done.is_set():
                     with store.lock:
-                        mems = get_all_memories(store.conn)
+                        mems = read_all_memories(store.conn)
                     read_results.append(len(mems))
             except Exception as e:
                 errors.append(e)
@@ -95,7 +95,7 @@ class TestConcurrentInserts:
 
         assert errors == [], f"Concurrent ops raised: {errors}"
         with store.lock:
-            mems = get_all_memories(store.conn)
+            mems = read_all_memories(store.conn)
         assert len(mems) == 11
 
     def test_concurrent_index_search_and_rebuild(self, store):

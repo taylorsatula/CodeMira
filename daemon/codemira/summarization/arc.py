@@ -2,15 +2,15 @@ import hashlib
 import logging
 import sqlite3
 
-from codemira.extraction.chunker import estimate_token_count, PROMPT_OVERHEAD_TOKENS, split_into_turns, pack_turns_into_chunks
+from codemira.extraction.chunker import get_token_count, PROMPT_OVERHEAD_TOKENS, parse_turns, build_chunks
 from codemira.llm import call_llm
 from codemira.extraction.extractor import load_prompt
-from codemira.store.db import upsert_arc_fragment, get_arc_fragments, delete_arc_fragments_from
+from codemira.store.db import upsert_arc_fragment, read_arc_fragments, delete_arc_fragments_from
 
 log = logging.getLogger(__name__)
 
 
-def _chunk_hash(content: str) -> str:
+def _get_chunk_hash(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
@@ -30,11 +30,11 @@ def _format_raw_transcript(conversation: list[dict]) -> str:
     return render_transcript(iter_turns(conversation), _render_tool)
 
 
-def _chunk_transcript(transcript: str, context_length: int, chunk_target_tokens: int) -> list[str]:
+def _build_arc_chunks(transcript: str, context_length: int, chunk_target_tokens: int) -> list[str]:
     prior_arc_estimate = 1024
     chunk_budget = max(chunk_target_tokens, int(0.7 * context_length)) - PROMPT_OVERHEAD_TOKENS - prior_arc_estimate
     chunk_budget = max(chunk_budget, 1024)
-    return pack_turns_into_chunks(transcript, chunk_budget)
+    return build_chunks(transcript, chunk_budget)
 
 
 def generate_arc(
@@ -53,18 +53,18 @@ def generate_arc(
     if len(conversation) < 4:
         return None
     transcript = _format_raw_transcript(conversation)
-    chunks = _chunk_transcript(transcript, context_length, chunk_target_tokens)
+    chunks = _build_arc_chunks(transcript, context_length, chunk_target_tokens)
     system_prompt = load_prompt("arc_summarizer_system", prompts_dir).render()
     arc_user_template = load_prompt("arc_summarizer_user", prompts_dir)
 
-    existing_fragments = get_arc_fragments(memory_conn, session_id)
+    existing_fragments = read_arc_fragments(memory_conn, session_id)
     existing_by_index = {f["fragment_index"]: f for f in existing_fragments}
 
     # Find the first chunk whose content hash differs from the stored fragment.
     # All fragments from that point onward must be reprocessed (prior_arc cascades).
     first_dirty = len(chunks)
     for i in range(len(chunks)):
-        h = _chunk_hash(chunks[i])
+        h = _get_chunk_hash(chunks[i])
         stored = existing_by_index.get(i)
         if stored is None or stored["content_hash"] != h:
             first_dirty = i
@@ -95,7 +95,7 @@ def generate_arc(
                 break
             return None
         arc_parts.append(fragment)
-        upsert_arc_fragment(memory_conn, session_id, i, fragment, _chunk_hash(chunks[i]), len(conversation))
+        upsert_arc_fragment(memory_conn, session_id, i, fragment, _get_chunk_hash(chunks[i]), len(conversation))
         prior_arc = fragment
 
     arc = "\n".join(arc_parts)

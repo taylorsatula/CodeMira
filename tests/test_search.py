@@ -6,7 +6,7 @@ from tests.conftest import _make_embedding, _make_embeddings
 
 @pytest.fixture
 def search_setup(tmpdir_path, memory_db):
-    from codemira.store.db import insert_memory, get_or_create_entity, link_memory_entity
+    from codemira.store.db import insert_memory, upsert_entity, link_memory_entity
     from codemira.store.index import MemoryIndex
     embs = _make_embeddings(5)
     ids = []

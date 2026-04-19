@@ -26,9 +26,9 @@ class RetrieveHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             if self.path == "/health":
-                self._send_json(200, self._handle_health())
+                self._send_json(200, self._collect_health_status())
             elif self.path.startswith("/arc"):
-                self._send_json(200, self._handle_arc_get())
+                self._send_json(200, self._read_arc())
             else:
                 self._send_error(404, "not found")
         except _HttpError as e:
@@ -40,9 +40,9 @@ class RetrieveHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             routes = {
-                "/arc/generate": (self._handle_arc_generate, ["session_id", "project_root"]),
-                "/extract": (self._handle_extract, ["session_id", "project_root"]),
-                "/retrieve": (self._handle_retrieve, ["project_root"]),
+                "/arc/generate": (self._start_arc_generation, ["session_id", "project_root"]),
+                "/extract": (self._start_extraction, ["session_id", "project_root"]),
+                "/retrieve": (self._collect_retrieval_response, ["project_root"]),
             }
             if self.path not in routes:
                 self._send_error(404, "not found")
@@ -58,15 +58,15 @@ class RetrieveHandler(BaseHTTPRequestHandler):
             log.exception("POST %s crashed", self.path)
             self._send_error(500, str(e))
 
-    def _handle_health(self) -> dict:
+    def _collect_health_status(self) -> dict:
         return {
             "status": "ok",
-            "llm": self._check_llm(),
-            "embedding_model": self._check_embedding_model(),
+            "llm": self._is_llm_reachable(),
+            "embedding_model": self._is_embedding_model_ready(),
             "version": "0.1.0",
         }
 
-    def _handle_arc_get(self) -> dict:
+    def _read_arc(self) -> dict:
         from urllib.parse import urlparse, parse_qs
         params = parse_qs(urlparse(self.path).query)
         session_id = params.get("session_id", [""])[0]
@@ -74,29 +74,29 @@ class RetrieveHandler(BaseHTTPRequestHandler):
         if not session_id or not project_root:
             raise _HttpError(400, "session_id and project_root required")
         store = self.manager.get(project_root)
-        from codemira.store.db import get_arc
+        from codemira.store.db import read_arc
         with store.lock:
-            arc_record = get_arc(store.conn, session_id)
+            arc_record = read_arc(store.conn, session_id)
         arc = arc_record["arc"] if arc_record else None
         return {"arc": arc, "session_id": session_id}
 
-    def _handle_arc_generate(self, data: dict) -> tuple[int, dict]:
-        self._run_in_background(self._generate_arc, data["session_id"], data["project_root"])
+    def _start_arc_generation(self, data: dict) -> tuple[int, dict]:
+        self._spawn_thread(self._generate_arc, data["session_id"], data["project_root"])
         return 202, {"status": "generating"}
 
-    def _handle_extract(self, data: dict) -> tuple[int, dict]:
-        self._run_in_background(self._extract_session, data["session_id"], data["project_root"])
+    def _start_extraction(self, data: dict) -> tuple[int, dict]:
+        self._spawn_thread(self._extract_session, data["session_id"], data["project_root"])
         return 202, {"status": "extracting"}
 
-    def _handle_retrieve(self, data: dict) -> tuple[int, dict]:
+    def _collect_retrieval_response(self, data: dict) -> tuple[int, dict]:
         if self.config.loud:
             log.info("── Subcortical → /retrieve ──\n  query: %s\n  entities: %s",
                      data.get("query_expansion", ""), data.get("entities", []))
         project_root = data["project_root"]
         store = self.manager.get(project_root)
-        from codemira.retrieval.proactive import retrieve
+        from codemira.retrieval.proactive import collect_ranked_memories
         with store.lock:
-            memories = retrieve(
+            memories = collect_ranked_memories(
                 query_expansion=data["query_expansion"],
                 entities=data.get("entities", []),
                 pinned_memory_ids=data.get("pinned_memory_ids", []),
@@ -181,10 +181,10 @@ class RetrieveHandler(BaseHTTPRequestHandler):
     def _send_error(self, code: int, message: str):
         self._send_json(code, {"error": message})
 
-    def _run_in_background(self, target, *args):
+    def _spawn_thread(self, target, *args):
         threading.Thread(target=target, args=args, daemon=True).start()
 
-    def _check_llm(self) -> bool:
+    def _is_llm_reachable(self) -> bool:
         base_url = self.config.subcortical_base_url.rstrip("/")
         try:
             urllib.request.urlopen(f"{base_url}/models", timeout=2)
@@ -195,7 +195,7 @@ class RetrieveHandler(BaseHTTPRequestHandler):
         except Exception:
             return False
 
-    def _check_embedding_model(self) -> bool:
+    def _is_embedding_model_ready(self) -> bool:
         try:
             from codemira.embeddings import EmbeddingsProvider
             EmbeddingsProvider.get()
